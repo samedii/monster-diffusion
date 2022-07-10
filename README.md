@@ -7,7 +7,7 @@ Generates 48x48 images of monsters.
 | ------ | ------- |
 | ??.??  | ??.??   |
 
-FID between `train` and `early_stopping` is **5.74**. `FID@k` means that the
+FID between `train` and `early_stopping` is **7.36**. `FID@k` means that the
 samples require `k` model evaluations.
 
 Inspired by:
