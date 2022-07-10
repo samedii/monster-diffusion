@@ -11,7 +11,7 @@ from .model import Model
 
 
 @contextmanager
-def temporary_samples(model: Model, n_samples=512, batch_size=128, n_evaluations=100):
+def temporary_samples(model: Model, n_samples=1024, batch_size=128, n_evaluations=100):
     try:
         with TemporaryDirectory() as temporary_dir, torch.random.fork_rng(), lantern.module_eval(
             model

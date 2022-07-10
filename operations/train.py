@@ -223,7 +223,7 @@ def train(config):
             if name == "evaluate_early_stopping":
                 early_stopping_metrics = evaluate_metrics
 
-        n_evaluations = 20
+        n_evaluations = 100
         with temporary_samples(
             model, batch_size=config["eval_batch_size"], n_evaluations=n_evaluations
         ) as samples_dir:
@@ -249,6 +249,7 @@ def train(config):
                 print(f"evaluate_{name}/fid@{n_evaluations}: {fid_score}")
 
         if epoch >= 10 and epoch % 10 == 0:
+            n_evaluations = 20
             with temporary_cheat_samples(
                 model,
                 variational_encoder,
@@ -294,14 +295,15 @@ def train(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=40)
     parser.add_argument("--eval_batch_size", type=int, default=32)
-    parser.add_argument("--learning_rate", type=float, default=1e-5)
-    parser.add_argument("--kl_target", type=float, default=0.005)
+    parser.add_argument("--learning_rate", type=float, default=5e-5)
+    parser.add_argument("--kl_target", type=float, default=1e-3)
     parser.add_argument("--max_epochs", type=int, default=250)
-    parser.add_argument("--n_batches_per_epoch", default=2000, type=int)
-    parser.add_argument("--patience", type=float, default=25)
+    parser.add_argument("--n_batches_per_epoch", default=10000, type=int)
+    parser.add_argument("--patience", type=float, default=10)
     parser.add_argument("--n_workers", default=8, type=int)
+    parser.add_argument("--debug", default=0, type=int)
     args = parser.parse_args()
 
     config = vars(args)
@@ -313,17 +315,20 @@ if __name__ == "__main__":
 
     Path("config.json").write_text(json.dumps(config))
 
-    wandb.init(
-        project="monster-diffusion",
-        save_code=False,
-        resume="never",
-        magic=True,
-        anonymous="never",
-        id=config["run_id"],
-        name=Path(".guild/attrs/label").read_text(),
-        tags=[config["run_id"]],
-        sync_tensorboard=True,
-        config=config,
-    )
+    torch.set_anomaly_enabled(True)
+
+    if config["debug"] == 0:
+        wandb.init(
+            project="monster-diffusion",
+            save_code=False,
+            resume="never",
+            magic=True,
+            anonymous="never",
+            id=config["run_id"],
+            name=Path(".guild/attrs/label").read_text(),
+            tags=[config["run_id"]],
+            sync_tensorboard=True,
+            config=config,
+        )
 
     train(config)
