@@ -1,0 +1,100 @@
+- package: monster-diffusion-package
+  data-files:
+    - monster_diffusion/splits/*.json
+    - pyproject.toml
+
+- model: monster-diffusion-r1
+  sourcecode:
+    - "*.py"
+    - "*.json"
+    - guild.yml
+    - exclude:
+        dir:
+          - input
+          - tb
+          - checkpoints
+  operations:
+    search_lr:
+      main: operations.search_lr
+      flags-import: all
+      output-scalars: off
+      requires:
+        - splits
+        - config
+    research_lr:
+      main: operations.search_lr
+      flags-import: all
+      output-scalars: off
+      requires:
+        - model
+        - splits
+        - config
+    train:
+      main: operations.train
+      flags-import: all
+      output-scalars: off
+      requires:
+        - splits
+        - config
+    retrain:
+      main: operations.train
+      flags-import: all
+      output-scalars: off
+      requires:
+        - model
+        - splits
+        - config
+    swa:
+      main: operations.swa
+      flags-import: all
+      output-scalars: off
+      requires:
+        - model
+        - splits
+        - config
+    evaluate:
+      main: operations.evaluate
+      flags-import: all
+      output-scalars: off
+      requires:
+        - model
+        - splits
+        - config
+    prepare_fid:
+      main: operations.prepare_fid
+      flags-import: all
+      output-scalars: off
+      requires:
+        - splits
+        - config
+    baseline_fid:
+      main: operations.baseline_fid
+      flags-import: all
+      output-scalars: off
+      requires:
+        - splits
+        - config
+    jupyter:
+      main: operations.jupyter
+      flags-import: all
+      output-scalars: off
+      requires:
+        - notebooks
+        - model
+        - splits
+        - config
+  resources:
+    model:
+      name: model
+      path: model
+      sources:
+        - operation: train|retrain|swa
+    splits:
+      path: monster_diffusion
+      sources:
+        - monster_diffusion/splits
+    notebooks:
+      sources:
+        - notebooks
+    config:
+      - file: pyproject.toml

@@ -1,0 +1,67 @@
+[tool.poetry]
+name = "monster-diffusion"
+version = "0.1.0"
+description = "Monster generation through diffusion"
+authors = ["Richard Löwenström"]
+packages = [
+    { include = "monster_diffusion" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.8.8,<3.11"
+torch = "^1.11.0"
+numpy = "^1.19.2"
+torchvision = "0.12.0"
+opencv-python = "^4.5.4,!=4.6.0.66"
+pytorch-datastream = "^0.4.6"
+pytorch-lantern = "^0.12.0"
+clean-fid = "^0.1.23"
+einops = "^0.4.1"
+einops-exts = "^0.0.3"
+
+[tool.poetry.dev-dependencies]
+guildai = "^0.8.1"
+filelock = "3.0.12" # later breaks guildai
+pylint = "^2.6.0"
+flake8 = "^3.8.4"
+black = "^22.3.0"
+pytest = "^6.1.2"
+ipykernel = "^5.4.2"
+notebook = "^6.2.0"
+ipywidgets = "^7.7.0"
+rkale = "^0.2.8"
+simple-pid = "^1.0.1"
+skyfog = {git = "git@github.com:nextml-code/skyfog.git", rev = "v0.5.3"}
+wandb = {url = "https://github.com/samedii/wandb-client/releases/download/v0.13.0rc4-guild/wandb-0.13.0rc5.dev1-py2.py3-none-any.whl"}
+docker-pycreds = {git = "https://github.com/samedii/dockerpy-creds.git"}
+monster-dataset = {git = "git@github.com:nextml-code/monster-dataset.git", rev = "v0.3.0"}
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+exclude = '''
+
+(
+  /(
+      \.eggs
+    | \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+  )/
+)
+'''
+
+[[tool.rkale.dataset]]
+name = "monster-dataset"
+remote = "aiwizo-wasabi"
