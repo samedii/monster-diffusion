@@ -12,6 +12,7 @@ from . import standardize
 from .unet import UNet
 from .ddpm import DDPM
 from .imagen import ImagenUnet
+from . import k_diffusion
 from .pseudo_linear_sampler import PseudoLinearSampler
 from . import diffusion
 from .variational_encoder import VariationalFeatures
@@ -32,10 +33,14 @@ class Model(nn.Module):
         #     channel_mult=(1, 2, 2, 2),
         #     num_heads=4,
         #     use_scale_shift_norm=True,
-        #     conditioning_dim=16 * 6 * 6,
+        #     conditioning_dim=np.prod(settings.PRIOR_SHAPE),
         # )
-        self.network = DDPM()
-        # self.network = ImagenUnet(text_embed_dim=16 * 6 * 6)
+        # self.network = DDPM()
+        # self.network = ImagenUnet(text_embed_dim=np.prod(settings.PRIOR_SHAPE))
+        self.network = k_diffusion.Model(
+            mapping_cond_dim=np.prod(settings.PRIOR_SHAPE),
+            unet_cond_dim=settings.PRIOR_SHAPE[0],
+        )
 
         latent_channels = 64
         channels = 64
@@ -51,25 +56,6 @@ class Model(nn.Module):
 
     @staticmethod
     def training_ts(size):
-        # n_sampling_ts = size // 4
-        # random_ts = (
-        #     diffusion.P_mean + torch.randn(size - n_sampling_ts) * diffusion.P_std
-        # ).exp()
-        # n_steps = 1000
-        # schedule_ts = Model.schedule_ts(n_steps)
-        # sampling_ts = torch.cat(
-        #     [
-        #         schedule_ts,
-        #         Model.reversed_ts(schedule_ts, n_steps),
-        #     ]
-        # ).unique()
-        # choice = np.random.choice(len(sampling_ts), n_sampling_ts)
-        # return torch.cat(
-        #     [
-        #         random_ts,
-        #         sampling_ts[choice],
-        #     ]
-        # )
         random_ts = (diffusion.P_mean + torch.randn(size) * diffusion.P_std).exp()
         return random_ts
 
@@ -160,19 +146,16 @@ class Model(nn.Module):
         ts = ts.to(self.device)
 
         output = self.network(
-            torch.cat(
-                [
-                    self.c_in(ts) * diffused_xs,
-                    F.interpolate(
-                        variational_features.features,
-                        size=diffused_xs.shape[2:],
-                        mode="nearest",
-                    ),
-                ],
-                dim=1,
-            ),
+            self.c_in(ts) * diffused_xs,
             self.c_noise(ts),
-            self.decoded_sample(variational_features.features).flatten(start_dim=1),
+            mapping_cond=self.decoded_sample(variational_features.features).flatten(
+                start_dim=1
+            ),
+            unet_cond=F.interpolate(
+                variational_features.features,
+                size=diffused_xs.shape[2:],
+                mode="nearest",
+            ),
         )
         return self.c_skip(ts) * diffused_xs + self.c_out(ts) * output
 
