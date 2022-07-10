@@ -1,6 +1,6 @@
 # monster diffusion
 
-Generates 96x96 images of monsters.
+Generates 48x48 images of monsters.
 ![generated monsters](docs/samples.png)
 
 | FID@20 | FID@100 |

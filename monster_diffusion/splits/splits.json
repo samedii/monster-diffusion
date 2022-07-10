@@ -6508,7 +6508,8 @@
         "Sprites-Enemy01/attack10.png",
         "Sprites-Enemy01/fly04.png",
         "Sprites-Enemy01/hit03.png",
-        "Sprites-Enemy01/fly03.png"
+        "Sprites-Enemy01/fly03.png",
+        "pokemon-png-yellow/substitute.png"
     ],
     "early_stopping": [
         "Warrior_Idle/Warrior_Idle_2.png",
@@ -10798,6 +10799,7 @@
         "Sprites-Enemy01/fly01.png",
         "Sprites-Enemy01/fly02.png",
         "Sprites-Enemy01/fly05.png",
-        "Sprites-Enemy01/fly07.png"
+        "Sprites-Enemy01/fly07.png",
+        "pokemon-png-crystal/substitute.png"
     ]
 }
