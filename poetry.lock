@@ -1173,6 +1173,17 @@ extra = ["lxml (>=4.6)", "pygraphviz (>=1.9)", "pydot (>=1.4.2)", "sympy (>=1.10
 test = ["pytest (>=7.1)", "pytest-cov (>=3.0)", "codecov (>=2.1)"]
 
 [[package]]
+name = "nicefid"
+version = "1.1.0"
+description = "Minimalistic wrapper around cleanfid to make the api more user friendly. Calculates FID and KID from sets of images."
+category = "dev"
+optional = false
+python-versions = ">=3.8,<4.0"
+
+[package.dependencies]
+clean-fid = ">=0.1.24,<0.2.0"
+
+[[package]]
 name = "notebook"
 version = "6.4.12"
 description = "A web-based notebook environment for interactive computing"
@@ -2479,7 +2490,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8.8,<3.11"
-content-hash = "9c3be5cdee89f9f75e4b5ca6d7de4c7c79c5142b00a6bc7416201d6d3cb77ae0"
+content-hash = "91a041d4e1c6d2ab2eb362b44919b99dbb20210e9282ab0eb58d293e90481309"
 
 [metadata.files]
 absl-py = [
@@ -3092,6 +3103,10 @@ nest-asyncio = [
 networkx = [
     {file = "networkx-2.8.4-py3-none-any.whl", hash = "sha256:6933b9b3174a0bdf03c911bb4a1ee43a86ce3edeb813e37e1d4c553b3f4a2c4f"},
     {file = "networkx-2.8.4.tar.gz", hash = "sha256:5e53f027c0d567cf1f884dbb283224df525644e43afd1145d64c9d88a3584762"},
+]
+nicefid = [
+    {file = "nicefid-1.1.0-py3-none-any.whl", hash = "sha256:29447a5cb85a990ac1e16859131faffd99a6ceb3c8821dd85e28fc5a2b60704e"},
+    {file = "nicefid-1.1.0.tar.gz", hash = "sha256:b37cb1b5f77066d9073ead1c682060e9994402f5aef886027845dded98fdb89c"},
 ]
 notebook = [
     {file = "notebook-6.4.12-py3-none-any.whl", hash = "sha256:8c07a3bb7640e371f8a609bdbb2366a1976c6a2589da8ef917f761a61e3ad8b1"},

@@ -20,7 +20,7 @@ class Prediction(FunctionalBase):
         return np.uint8(
             torch.cat(
                 [
-                    torch.from_numpy(example.image).permute(2, 0, 1),
+                    torch.from_numpy(example.image).clamp(0, 255).permute(2, 0, 1),
                     horizontal_line,
                     diffused_image,
                     horizontal_line,

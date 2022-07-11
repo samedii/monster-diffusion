@@ -94,6 +94,12 @@ def train(config):
 
         for examples in lantern.ProgressBar(train_data_loader, "train", train_metrics):
             images = torch.stack([TF.to_tensor(example.image) for example in examples])
+            nonleaky_augmentations = torch.stack(
+                [
+                    torch.from_numpy(example.nonleaky_augmentations)
+                    for example in examples
+                ]
+            )
 
             ts = Model.training_ts(len(examples))
             noise = torch.randn_like(images.float())
@@ -105,6 +111,7 @@ def train(config):
                 predictions = model.predictions_(
                     diffused,
                     ts,
+                    nonleaky_augmentations,
                     variational_features,
                 )
                 variational_losses = variational_features.losses()
@@ -175,6 +182,12 @@ def train(config):
                 images = torch.stack(
                     [TF.to_tensor(example.image) for example in examples]
                 )
+                nonleaky_augmentations = torch.stack(
+                    [
+                        torch.from_numpy(example.nonleaky_augmentations)
+                        for example in examples
+                    ]
+                )
 
                 evaluation_ts = Model.evaluation_ts()
                 choice = torch.tensor(
@@ -196,6 +209,7 @@ def train(config):
                     predictions = model.predictions(
                         diffused,
                         ts,
+                        nonleaky_augmentations,
                         variational_features,
                     )
                     variational_losses = variational_features.losses()
@@ -297,8 +311,8 @@ if __name__ == "__main__":
     parser.add_argument("--evaluate_batch_size", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--kl_target", type=float, default=1e-3)
-    parser.add_argument("--max_steps", type=int, default=10000 * 200)
-    parser.add_argument("--evaluate_every", default=10000, type=int)
+    parser.add_argument("--max_steps", type=int, default=5000 * 200)
+    parser.add_argument("--evaluate_every", default=5000, type=int)
     parser.add_argument("--patience", type=float, default=10)
     parser.add_argument("--n_workers", default=8, type=int)
     parser.add_argument("--debug", default=0, type=int)
@@ -312,8 +326,6 @@ if __name__ == "__main__":
     )
 
     Path("config.json").write_text(json.dumps(config))
-
-    torch.set_anomaly_enabled(True)
 
     if config["debug"] == 0:
         wandb.init(
