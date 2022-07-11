@@ -5,7 +5,7 @@ Generates 48x48 images of monsters.
 
 | FID@20 | FID@100 |
 | ------ | ------- |
-| ??.??  | ??.??   |
+| ??.??  | 45.3    |
 
 FID between `train` and `early_stopping` is **7.36**. `FID@k` means that the
 samples require `k` model evaluations.
@@ -29,9 +29,9 @@ poetry add git+https://github.com/samedii/monster-diffusion.git
 ## Usage
 
 ```python
-import diffusion
+import monster_diffusion
 
-image = diffusion.sample()
+image = monster_diffusion.sample()
 ```
 
 ## Development

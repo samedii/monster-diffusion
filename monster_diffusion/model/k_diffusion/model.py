@@ -153,7 +153,7 @@ class Model(nn.Module):
         mapping_cond_dim=0,
         unet_cond_dim=0,
         cross_cond_dim=0,
-        dropout_rate=0.0,
+        dropout_rate=0.05,
     ):
         super().__init__()
         self.timestep_embed = layers.FourierFeatures(1, feats_in)
