@@ -1,27 +1,26 @@
-from uuid import UUID
-from datetime import datetime
 from PIL import Image
+import numpy as np
 import lantern
-from typing import List
-from pydantic import Extra
 
 
 class Example(lantern.FunctionalBase):
     key: str
-    image: lantern.Numpy
+    image: lantern.Numpy.dims("HWC").dtype(np.float32)
+    nonleaky_augmentations: lantern.Numpy.shape(9).dtype(np.float32)
 
-    class Config:
-        extra = Extra.ignore
+    def hash(self):
+        return hash(self.key)
 
     @staticmethod
     def from_row(row):
         return Example(
+            key=row.key,
             image=Image.open(row.image_path).convert("RGBA"),
-            **row.to_dict(),
+            nonleaky_augmentations=np.zeros((9,), dtype=np.float32),
         )
 
     def representation(self):
-        return Image.fromarray(self.image)
+        return Image.fromarray(np.clip(self.image, 0, 255).astype(np.uint8))
 
     @property
     def _repr_png_(self):
@@ -31,5 +30,12 @@ class Example(lantern.FunctionalBase):
         image = augmenter(image=self.image)
         return self.replace(image=image)
 
-    def hash(self):
-        return hash(self.key)
+    def nonleaky_augment(self, augmenter):
+        if (self.nonleaky_augmentations != 0).any():
+            raise ValueError("Example has already been nonleaky augmented")
+        else:
+            image, nonleaky_augmentations = augmenter(image=self.image)
+            return self.replace(
+                image=image,
+                nonleaky_augmentations=nonleaky_augmentations,
+            )

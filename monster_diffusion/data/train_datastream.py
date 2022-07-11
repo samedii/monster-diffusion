@@ -3,13 +3,15 @@ from datastream import Datastream
 
 from monster_diffusion import settings
 from .datasets import datasets
+from .nonleaky_augmenter import NonleakyAugmenter
 
 
 def train_datastream(dataset=None):
     if dataset is None:
         dataset = datasets()["train"]
 
-    augmenter_ = augmenter()
+    # augmenter_ = augmenter()
+    nonleaky_augmenter = NonleakyAugmenter()
     # crop = iaa.CropToFixedSize(
     #     settings.INPUT_WIDTH,
     #     settings.INPUT_HEIGHT,
@@ -19,7 +21,9 @@ def train_datastream(dataset=None):
     #     settings.INPUT_HEIGHT,
     #     position="uniform",
     # )
-    return Datastream(dataset).map(lambda example: example.augment(augmenter_))
+    return Datastream(dataset).map(
+        lambda example: example.nonleaky_augment(nonleaky_augmenter)
+    )
 
 
 def augmenter():

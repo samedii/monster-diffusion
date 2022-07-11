@@ -38,7 +38,7 @@ class Model(nn.Module):
         # self.network = DDPM()
         # self.network = ImagenUnet(text_embed_dim=np.prod(settings.PRIOR_SHAPE))
         self.network = k_diffusion.Model(
-            mapping_cond_dim=np.prod(settings.PRIOR_SHAPE),
+            mapping_cond_dim=np.prod(settings.PRIOR_SHAPE) + 9,
             unet_cond_dim=settings.PRIOR_SHAPE[0],
         )
 
@@ -137,6 +137,7 @@ class Model(nn.Module):
         self,
         diffused_images: Tensor.dims("NCHW").shape(-1, *settings.INPUT_SHAPE).float(),
         ts: Tensor.dims("N"),
+        nonleaky_augmentations: Tensor.dims("NK"),
         variational_features: VariationalFeatures,
     ) -> Tensor.dims("NCHW").shape(-1, *settings.INPUT_SHAPE):
         """
@@ -144,12 +145,19 @@ class Model(nn.Module):
         """
         diffused_xs = standardize.encode(diffused_images.to(self.device))
         ts = ts.to(self.device)
+        nonleaky_augmentations = nonleaky_augmentations.to(self.device)
 
         output = self.network(
             self.c_in(ts) * diffused_xs,
             self.c_noise(ts),
-            mapping_cond=self.decoded_sample(variational_features.features).flatten(
-                start_dim=1
+            mapping_cond=torch.cat(
+                [
+                    nonleaky_augmentations,
+                    self.decoded_sample(variational_features.features).flatten(
+                        start_dim=1
+                    ),
+                ],
+                dim=1,
             ),
             unet_cond=F.interpolate(
                 variational_features.features,
@@ -163,11 +171,13 @@ class Model(nn.Module):
         self,
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
+        nonleaky_augmentations: Tensor.dims("NK"),
         variational_features: VariationalFeatures,
     ):
         denoised_xs = self.denoised_(
             diffused_images,
             ts,
+            nonleaky_augmentations,
             variational_features,
         )
         return model.PredictionBatch(
@@ -180,11 +190,13 @@ class Model(nn.Module):
         self,
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
+        nonleaky_augmentations: Tensor.dims("NK"),
         variational_features: VariationalFeatures,
     ):
         return self.forward(
             diffused_images,
             ts,
+            nonleaky_augmentations,
             variational_features,
         )
 
@@ -192,6 +204,7 @@ class Model(nn.Module):
         self,
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
+        nonleaky_augmentations: Tensor.dims("NK"),
         variational_features: VariationalFeatures,
     ):
         if self.training:
@@ -201,6 +214,7 @@ class Model(nn.Module):
         return self.predictions_(
             diffused_images,
             ts,
+            nonleaky_augmentations,
             variational_features,
         )
 
@@ -245,6 +259,9 @@ class Model(nn.Module):
             diffused_images = self.random_noise(size)
         if variational_features is None:
             variational_features = VariationalFeatures.sample(size).to(self.device)
+        nonleaky_augmentations = torch.zeros(
+            (size, 9), dtype=torch.float32, device=self.device
+        )
 
         n_steps = n_evaluations // 2
         schedule_ts = self.schedule_ts(n_steps)[:, None].repeat(1, size).to(self.device)
@@ -257,6 +274,7 @@ class Model(nn.Module):
             predictions = self.predictions(
                 diffused_images,
                 reversed_ts,
+                nonleaky_augmentations,
                 variational_features,
             )
             reversed_eps = predictions.eps
@@ -266,6 +284,7 @@ class Model(nn.Module):
             predictions = self.predictions(
                 diffused_images,
                 to_ts,
+                nonleaky_augmentations,
                 variational_features,
             )
             diffused_images = predictions.correction(
@@ -280,6 +299,7 @@ class Model(nn.Module):
         predictions = self.predictions(
             diffused_images,
             reversed_ts,
+            nonleaky_augmentations,
             variational_features,
         )
         progress.close()

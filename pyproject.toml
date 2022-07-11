@@ -35,6 +35,7 @@ skyfog = {git = "git@github.com:nextml-code/skyfog.git", rev = "v0.5.3"}
 wandb = {url = "https://github.com/samedii/wandb-client/releases/download/v0.13.0rc4-guild/wandb-0.13.0rc5.dev1-py2.py3-none-any.whl"}
 docker-pycreds = {git = "https://github.com/samedii/dockerpy-creds.git"}
 monster-dataset = {git = "git@github.com:nextml-code/monster-dataset.git", rev = "v0.3.0"}
+nicefid = "^1.1.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
