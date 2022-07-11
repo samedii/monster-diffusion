@@ -50,7 +50,7 @@ def train(config):
 
     train_data_loader = train_datastream.data_loader(
         batch_size=config["batch_size"],
-        n_batches_per_epoch=config["n_batches_per_epoch"],
+        n_batches_per_epoch=config["evaluate_every"],
         collate_fn=list,
         num_workers=config["n_workers"],
         worker_init_fn=worker_init_fn(config["seed"]),
@@ -62,7 +62,7 @@ def train(config):
         f"evaluate_{name}": (
             (
                 evaluate_datastreams[name].data_loader(
-                    batch_size=config["eval_batch_size"],
+                    batch_size=config["evaluate_batch_size"],
                     collate_fn=list,
                     num_workers=config["n_workers"],
                 )
@@ -87,10 +87,10 @@ def train(config):
     early_stopping = lantern.EarlyStopping(tensorboard_logger=tensorboard_logger)
     train_metrics = metrics.train_metrics()
 
-    scheduler = InverseLR(optimizer, inv_gamma=50000, power=1 / 2, warmup=0.99)
+    scheduler = InverseLR(optimizer, inv_gamma=20000, power=1, warmup=0.99)
 
     n_train_steps = 0
-    for epoch in lantern.Epochs(config["max_epochs"]):
+    for _ in lantern.Epochs(config["max_steps"] // config["evaluate_every"]):
 
         for examples in lantern.ProgressBar(train_data_loader, "train", train_metrics):
             images = torch.stack([TF.to_tensor(example.image) for example in examples])
@@ -148,7 +148,7 @@ def train(config):
                 metric.log_dict(tensorboard_logger, "train", n_train_steps)
 
         print(lantern.MetricTable("train", train_metrics))
-        log_examples(tensorboard_logger, "train", epoch, examples, predictions)
+        log_examples(tensorboard_logger, "train", n_train_steps, examples, predictions)
 
         for n_evaluations in [20, 100, 1000]:
             tensorboard_logger.add_images(
@@ -157,12 +157,13 @@ def train(config):
                     [
                         image.clamp(0, 1)
                         for index, image in enumerate(
-                            model.elucidated_sample(1, n_evaluations, progress=True)
+                            model.elucidated_sample(5, n_evaluations, progress=True)
                         )
                         if (index + 1) % (n_evaluations // 10) == 0
                     ],
+                    dim=-2,
                 ),
-                epoch,
+                n_train_steps,
                 dataformats="NCHW",
             )
 
@@ -215,17 +216,17 @@ def train(config):
                 evaluate_metrics["eps_mse"].update_(predictions.eps_mse(noise))
 
             for metric in evaluate_metrics.values():
-                metric.log_dict(tensorboard_logger, name, epoch)
+                metric.log_dict(tensorboard_logger, name, n_train_steps)
 
             print(lantern.MetricTable(name, evaluate_metrics))
-            log_examples(tensorboard_logger, name, epoch, examples, predictions)
+            log_examples(tensorboard_logger, name, n_train_steps, examples, predictions)
 
             if name == "evaluate_early_stopping":
                 early_stopping_metrics = evaluate_metrics
 
         n_evaluations = 100
         with temporary_samples(
-            model, batch_size=config["eval_batch_size"], n_evaluations=n_evaluations
+            model, batch_size=config["evaluate_batch_size"], n_evaluations=n_evaluations
         ) as samples_dir:
             fid_scores = {
                 name: fid.compute_fid(
@@ -235,50 +236,47 @@ def train(config):
                     dataset_split="custom",
                     verbose=False,
                     num_workers=config["n_workers"],
-                    batch_size=config["eval_batch_size"],
+                    batch_size=config["evaluate_batch_size"],
+                )
+                for name in [
+                    "train",
+                    "early_stopping",
+                ]
+            }
+            for name, fid_score in fid_scores.items():
+                tensorboard_logger.add_scalar(
+                    f"evaluate_{name}/fid@{n_evaluations}", fid_score, n_train_steps
+                )
+                print(f"evaluate_{name}/fid@{n_evaluations}: {fid_score}")
+
+        n_evaluations = 20
+        with temporary_cheat_samples(
+            model,
+            variational_encoder,
+            evaluate_data_loaders["evaluate_early_stopping"],
+            n_evaluations=n_evaluations,
+        ) as samples_dir:
+            cheat_fid_scores = {
+                name: fid.compute_fid(
+                    samples_dir,
+                    dataset_name=settings.FID_STATISTICS_NAMES[name],
+                    dataset_res=settings.INPUT_HEIGHT,
+                    dataset_split="custom",
+                    verbose=False,
+                    num_workers=config["n_workers"],
                 )
                 for name in [
                     # "train",
                     "early_stopping",
                 ]
             }
-            for name, fid_score in fid_scores.items():
+            for name, cheat_fid_score in cheat_fid_scores.items():
                 tensorboard_logger.add_scalar(
-                    f"evaluate_{name}/fid@{n_evaluations}", fid_score, epoch
+                    f"evaluate_{name}/cheat_fid@{n_evaluations}",
+                    cheat_fid_score,
+                    n_train_steps,
                 )
-                print(f"evaluate_{name}/fid@{n_evaluations}: {fid_score}")
-
-        if epoch >= 10 and epoch % 10 == 0:
-            n_evaluations = 20
-            with temporary_cheat_samples(
-                model,
-                variational_encoder,
-                evaluate_data_loaders["evaluate_early_stopping"],
-                n_evaluations=n_evaluations,
-            ) as samples_dir:
-                cheat_fid_scores = {
-                    name: fid.compute_fid(
-                        samples_dir,
-                        dataset_name=settings.FID_STATISTICS_NAMES[name],
-                        dataset_res=settings.INPUT_HEIGHT,
-                        dataset_split="custom",
-                        verbose=False,
-                        num_workers=config["n_workers"],
-                    )
-                    for name in [
-                        # "train",
-                        "early_stopping",
-                    ]
-                }
-                for name, cheat_fid_score in cheat_fid_scores.items():
-                    tensorboard_logger.add_scalar(
-                        f"evaluate_{name}/cheat_fid@{n_evaluations}",
-                        cheat_fid_score,
-                        epoch,
-                    )
-                    print(
-                        f"evaluate_{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}"
-                    )
+                print(f"evaluate_{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
         early_stopping = early_stopping.score(-fid_scores["early_stopping"])
         if early_stopping.scores_since_improvement == 0:
@@ -288,7 +286,7 @@ def train(config):
             torch.save(kl_weight_controller.state_dict(), "kl_weight_controller.pt")
         elif early_stopping.scores_since_improvement > config["patience"]:
             break
-        early_stopping.log(epoch).print()
+        early_stopping.log(n_train_steps).print()
 
     tensorboard_logger.close()
 
@@ -296,11 +294,11 @@ def train(config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=40)
-    parser.add_argument("--eval_batch_size", type=int, default=32)
+    parser.add_argument("--evaluate_batch_size", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--kl_target", type=float, default=1e-3)
-    parser.add_argument("--max_epochs", type=int, default=250)
-    parser.add_argument("--n_batches_per_epoch", default=10000, type=int)
+    parser.add_argument("--max_steps", type=int, default=10000 * 200)
+    parser.add_argument("--evaluate_every", default=10000, type=int)
     parser.add_argument("--patience", type=float, default=10)
     parser.add_argument("--n_workers", default=8, type=int)
     parser.add_argument("--debug", default=0, type=int)
