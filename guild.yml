@@ -60,13 +60,6 @@
         - model
         - splits
         - config
-    prepare_fid:
-      main: operations.prepare_fid
-      flags-import: all
-      output-scalars: off
-      requires:
-        - splits
-        - config
     baseline_fid:
       main: operations.baseline_fid
       flags-import: all

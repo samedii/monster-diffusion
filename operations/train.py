@@ -9,7 +9,7 @@ import torch.utils.tensorboard
 import torchvision.transforms.functional as TF
 import lantern
 from lantern import set_seeds, worker_init_fn
-from cleanfid import fid
+import nicefid
 import wandb
 
 from monster_diffusion import (
@@ -19,8 +19,8 @@ from monster_diffusion import (
     log_examples,
 )
 from monster_diffusion.model.variational_encoder import VariationalEncoderLDM
-from monster_diffusion.temporary_samples import temporary_samples
-from monster_diffusion.temporary_cheat_samples import temporary_cheat_samples
+from monster_diffusion.generate_samples import generate_samples
+from monster_diffusion.generate_cheat_samples import generate_cheat_samples
 from monster_diffusion.tools.seeded_randn import seeded_randn
 from monster_diffusion.tools.inverse_lr import InverseLR
 from monster_diffusion.kl_weight_controller import KLWeightController
@@ -74,6 +74,17 @@ def train(config):
         ]
     }
 
+    def generator(data_loader):
+        for examples in data_loader:
+            yield torch.stack(
+                [TF.to_tensor(example.image).div(255) for example in examples]
+            )
+
+    fid_features = {
+        name: nicefid.Features.from_iterator(generator(data_loader))
+        for name, data_loader in evaluate_data_loaders.items()
+    }
+
     if Path("model").exists():
         print("Loading model checkpoint")
         model.load_state_dict(torch.load("model/model.pt", map_location=device))
@@ -93,7 +104,9 @@ def train(config):
     for _ in lantern.Epochs(config["max_steps"] // config["evaluate_every"]):
 
         for examples in lantern.ProgressBar(train_data_loader, "train", train_metrics):
-            images = torch.stack([TF.to_tensor(example.image) for example in examples])
+            images = torch.stack(
+                [TF.to_tensor(example.image) for example in examples]
+            ).div(255)
             nonleaky_augmentations = torch.stack(
                 [
                     torch.from_numpy(example.nonleaky_augmentations)
@@ -174,14 +187,12 @@ def train(config):
                 dataformats="NCHW",
             )
 
-        early_stopping_metrics = None
-
         for name, data_loader in evaluate_data_loaders.items():
             evaluate_metrics = metrics.evaluate_metrics()
             for examples in lantern.ProgressBar(data_loader, name):
                 images = torch.stack(
                     [TF.to_tensor(example.image) for example in examples]
-                )
+                ).div(255)
                 nonleaky_augmentations = torch.stack(
                     [
                         torch.from_numpy(example.nonleaky_augmentations)
@@ -235,62 +246,44 @@ def train(config):
             print(lantern.MetricTable(name, evaluate_metrics))
             log_examples(tensorboard_logger, name, n_train_steps, examples, predictions)
 
-            if name == "evaluate_early_stopping":
-                early_stopping_metrics = evaluate_metrics
-
         n_evaluations = 100
-        with temporary_samples(
-            model, batch_size=config["evaluate_batch_size"], n_evaluations=n_evaluations
-        ) as samples_dir:
-            fid_scores = {
-                name: fid.compute_fid(
-                    samples_dir,
-                    dataset_name=settings.FID_STATISTICS_NAMES[name],
-                    dataset_res=settings.INPUT_HEIGHT,
-                    dataset_split="custom",
-                    verbose=False,
-                    num_workers=config["n_workers"],
-                    batch_size=config["evaluate_batch_size"],
-                )
-                for name in [
-                    "train",
-                    "early_stopping",
-                ]
-            }
-            for name, fid_score in fid_scores.items():
-                tensorboard_logger.add_scalar(
-                    f"evaluate_{name}/fid@{n_evaluations}", fid_score, n_train_steps
-                )
-                print(f"evaluate_{name}/fid@{n_evaluations}: {fid_score}")
+        fid_scores = {
+            name: nicefid.compute_fid(
+                features,
+                nicefid.Features.from_iterator(
+                    generate_samples(model, n_evaluations=n_evaluations)
+                ),
+            )
+            for name, features in fid_features.items()
+        }
+        for name, fid_score in fid_scores.items():
+            tensorboard_logger.add_scalar(
+                f"{name}/fid@{n_evaluations}", fid_score, n_train_steps
+            )
+            print(f"{name}/fid@{n_evaluations}: {fid_score}")
 
         n_evaluations = 20
-        with temporary_cheat_samples(
-            model,
-            variational_encoder,
-            evaluate_data_loaders["evaluate_early_stopping"],
-            n_evaluations=n_evaluations,
-        ) as samples_dir:
-            cheat_fid_scores = {
-                name: fid.compute_fid(
-                    samples_dir,
-                    dataset_name=settings.FID_STATISTICS_NAMES[name],
-                    dataset_res=settings.INPUT_HEIGHT,
-                    dataset_split="custom",
-                    verbose=False,
-                    num_workers=config["n_workers"],
-                )
-                for name in [
-                    # "train",
-                    "early_stopping",
-                ]
-            }
-            for name, cheat_fid_score in cheat_fid_scores.items():
-                tensorboard_logger.add_scalar(
-                    f"evaluate_{name}/cheat_fid@{n_evaluations}",
-                    cheat_fid_score,
-                    n_train_steps,
-                )
-                print(f"evaluate_{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
+        cheat_fid_scores = {
+            name: nicefid.compute_fid(
+                features,
+                nicefid.Features.from_iterator(
+                    generate_cheat_samples(
+                        model,
+                        variational_encoder,
+                        evaluate_data_loaders[name],
+                        n_evaluations=n_evaluations,
+                    )
+                ),
+            )
+            for name, features in fid_features.items()
+        }
+        for name, cheat_fid_score in cheat_fid_scores.items():
+            tensorboard_logger.add_scalar(
+                f"{name}/cheat_fid@{n_evaluations}",
+                cheat_fid_score,
+                n_train_steps,
+            )
+            print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
         early_stopping = early_stopping.score(-fid_scores["early_stopping"])
         if early_stopping.scores_since_improvement == 0:
