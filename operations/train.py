@@ -80,7 +80,7 @@ def train(config):
                 [TF.to_tensor(example.image).div(255) for example in examples]
             )
 
-    fid_features = {
+    reference_features = {
         name: nicefid.Features.from_iterator(generator(data_loader))
         for name, data_loader in evaluate_data_loaders.items()
     }
@@ -177,7 +177,7 @@ def train(config):
                     [
                         image.clamp(0, 1)
                         for index, image in enumerate(
-                            model.elucidated_sample(5, n_evaluations, progress=True)
+                            model.sample(5, n_evaluations, progress=True)
                         )
                         if (index + 1) % (n_evaluations // 10) == 0
                     ],
@@ -247,14 +247,15 @@ def train(config):
             log_examples(tensorboard_logger, name, n_train_steps, examples, predictions)
 
         n_evaluations = 100
+        generated_features = nicefid.Features.from_iterator(
+            generate_samples(model, n_evaluations=n_evaluations)
+        )
         fid_scores = {
             name: nicefid.compute_fid(
                 features,
-                nicefid.Features.from_iterator(
-                    generate_samples(model, n_evaluations=n_evaluations)
-                ),
+                generated_features,
             )
-            for name, features in fid_features.items()
+            for name, features in reference_features.items()
         }
         for name, fid_score in fid_scores.items():
             tensorboard_logger.add_scalar(
@@ -275,7 +276,7 @@ def train(config):
                     )
                 ),
             )
-            for name, features in fid_features.items()
+            for name, features in reference_features.items()
         }
         for name, cheat_fid_score in cheat_fid_scores.items():
             tensorboard_logger.add_scalar(

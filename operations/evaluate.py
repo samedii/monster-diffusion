@@ -2,12 +2,12 @@ import argparse
 import os
 import json
 from pathlib import Path
-import numpy as np
 import torch
 import torch.utils.tensorboard
+import torchvision.transforms.functional as TF
 import lantern
-from lantern import set_seeds, worker_init_fn
-from cleanfid import fid
+from lantern import set_seeds
+import nicefid
 
 from monster_diffusion import (
     data,
@@ -16,8 +16,8 @@ from monster_diffusion import (
     log_examples,
     settings,
 )
-from monster_diffusion.temporary_samples import temporary_samples
-from monster_diffusion.temporary_cheat_samples import temporary_cheat_samples
+from monster_diffusion.generate_samples import generate_samples
+from monster_diffusion.generate_cheat_samples import generate_cheat_samples
 from monster_diffusion.tools.seeded_randn import seeded_randn
 from monster_diffusion.model.variational_encoder import VariationalEncoderLDM
 
@@ -35,7 +35,7 @@ def evaluate(config):
         f"evaluate_{name}": (
             (
                 evaluate_datastreams[name].data_loader(
-                    batch_size=config["eval_batch_size"],
+                    batch_size=config["evaluate_batch_size"],
                     collate_fn=list,
                     num_workers=config["n_workers"],
                 )
@@ -55,31 +55,37 @@ def evaluate(config):
 
     tensorboard_logger = torch.utils.tensorboard.SummaryWriter(log_dir="tb")
 
-    epoch = 0
+    global_step = 0
 
     for n_evaluations in [20, 100, 1000]:
         tensorboard_logger.add_images(
             f"samples/@{n_evaluations}",
-            np.uint8(
-                np.stack(
-                    [
-                        image.clamp(0, 1).cpu().numpy()
-                        for index, image in enumerate(
-                            model.elucidated_sample(1, n_evaluations, progress=True)
-                        )
-                        if (index + 1) % (n_evaluations // 10) == 0
-                    ]
-                )
-                * 255
+            torch.cat(
+                [
+                    image.clamp(0, 1)
+                    for index, image in enumerate(
+                        model.sample(5, n_evaluations, progress=True)
+                    )
+                    if (index + 1) % (n_evaluations // 10) == 0
+                ],
+                dim=-2,
             ),
-            epoch,
+            global_step,
             dataformats="NCHW",
         )
 
     for name, data_loader in evaluate_data_loaders.items():
         evaluate_metrics = metrics.evaluate_metrics()
         for examples in lantern.ProgressBar(data_loader, name):
-            images = torch.from_numpy(np.stack([example.image for example in examples]))
+            images = torch.stack(
+                [TF.to_tensor(example.image) for example in examples]
+            ).div(255)
+            nonleaky_augmentations = torch.stack(
+                [
+                    torch.from_numpy(example.nonleaky_augmentations)
+                    for example in examples
+                ]
+            )
 
             evaluation_ts = Model.evaluation_ts()
             choice = torch.tensor(
@@ -88,7 +94,7 @@ def evaluate(config):
             ts = evaluation_ts[choice]
             noise = torch.stack(
                 [
-                    seeded_randn(example.image.shape, abs(example.hash()))
+                    seeded_randn(settings.INPUT_SHAPE, abs(example.hash()))
                     for example in examples
                 ]
             )
@@ -100,72 +106,80 @@ def evaluate(config):
                 predictions = model.predictions(
                     diffused,
                     ts,
+                    nonleaky_augmentations,
                     variational_features,
                 )
-                loss = predictions.loss(examples, noise)
-                variational_loss = variational_features.loss()
+                variational_losses = variational_features.losses()
+                variational_loss = variational_losses.mean()
+                loss = predictions.loss(images, noise)
 
             evaluate_metrics["loss"].update_(loss)
             evaluate_metrics["variational_loss"].update_(variational_loss)
-            evaluate_metrics["image_mse"].update_(predictions.image_mse(examples))
+            evaluate_metrics["image_mse"].update_(predictions.image_mse(images))
             evaluate_metrics["eps_mse"].update_(predictions.eps_mse(noise))
 
         for metric in evaluate_metrics.values():
-            metric.log_dict(tensorboard_logger, name, epoch)
+            metric.log_dict(tensorboard_logger, name, global_step)
 
         print(lantern.MetricTable(name, evaluate_metrics))
-        log_examples(tensorboard_logger, name, epoch, examples, predictions)
+        log_examples(tensorboard_logger, name, global_step, examples, predictions)
 
-    for n_evaluations in [20]:
-        with temporary_cheat_samples(
-            model,
-            variational_encoder,
-            evaluate_data_loaders["evaluate_early_stopping"],
-            n_evaluations=n_evaluations,
-        ) as samples_dir:
-            cheat_fid_scores = {
-                name: fid.compute_fid(
-                    samples_dir,
-                    dataset_name=settings.FID_STATISTICS_NAMES[name],
-                    dataset_res=96,
-                    dataset_split="custom",
-                    verbose=False,
-                    num_workers=0,
-                )
-                for name in ["train", "early_stopping"]
-            }
-            for name, cheat_fid_score in cheat_fid_scores.items():
-                tensorboard_logger.add_scalar(
-                    f"evaluate_{name}/cheat_fid@{n_evaluations}", cheat_fid_score, epoch
-                )
-                print(f"evaluate_{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
+    def generator(data_loader):
+        for examples in data_loader:
+            yield torch.stack(
+                [TF.to_tensor(example.image).div(255) for example in examples]
+            )
 
-        with temporary_samples(
-            model, batch_size=config["eval_batch_size"], n_evaluations=n_evaluations
-        ) as samples_dir:
-            fid_scores = {
-                name: fid.compute_fid(
-                    samples_dir,
-                    dataset_name=settings.FID_STATISTICS_NAMES[name],
-                    dataset_res=96,
-                    dataset_split="custom",
-                    verbose=False,
-                    num_workers=config["n_workers"],
-                )
-                for name in ["train", "early_stopping"]
-            }
-            for name, fid_score in fid_scores.items():
-                tensorboard_logger.add_scalar(
-                    f"evaluate_{name}/fid@{n_evaluations}", fid_score, epoch
-                )
-                print(f"evaluate_{name}/fid@{n_evaluations}: {fid_score}")
+    reference_features = {
+        name: nicefid.Features.from_iterator(generator(data_loader))
+        for name, data_loader in evaluate_data_loaders.items()
+    }
+
+    for n_evaluations in [20, 100]:
+        generated_features = nicefid.Features.from_iterator(
+            generate_samples(model, n_evaluations=n_evaluations)
+        )
+        fid_scores = {
+            name: nicefid.compute_fid(
+                features,
+                generated_features,
+            )
+            for name, features in reference_features.items()
+        }
+        for name, fid_score in fid_scores.items():
+            tensorboard_logger.add_scalar(
+                f"{name}/fid@{n_evaluations}", fid_score, global_step
+            )
+            print(f"{name}/fid@{n_evaluations}: {fid_score}")
+
+        cheat_fid_scores = {
+            name: nicefid.compute_fid(
+                features,
+                nicefid.Features.from_iterator(
+                    generate_cheat_samples(
+                        model,
+                        variational_encoder,
+                        evaluate_data_loaders[name],
+                        n_evaluations=n_evaluations,
+                    )
+                ),
+            )
+            for name, features in reference_features.items()
+        }
+        for name, cheat_fid_score in cheat_fid_scores.items():
+            tensorboard_logger.add_scalar(
+                f"{name}/cheat_fid@{n_evaluations}",
+                cheat_fid_score,
+                global_step,
+            )
+            print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
     tensorboard_logger.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--eval_batch_size", type=int, default=32)
+    parser.add_argument("--evaluate_batch_size", type=int, default=32)
     parser.add_argument("--n_workers", default=8, type=int)
     args = parser.parse_args()
 

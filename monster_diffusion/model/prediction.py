@@ -146,26 +146,3 @@ class PredictionBatch(FunctionalBase):
             / 2
         )
         return standardize.decode(corrected_diffused_xs)
-
-    def langevin_correction(self, target_snr=0.1):
-        """
-        The snr (signal-to-noise ratio) parameter of LangevinCorrector somewhat
-        behaves like a temperature parameter. Larger snr typically results in
-        smoother samples, while smaller snr gives more diverse but lower quality
-        samples. Typical values of snr is 0.05 - 0.2, and it requires tuning to
-        strike the sweet spot.
-        """
-        # https://github.com/yang-song/score_sde_pytorch/blob/1618ddea340f3e4a2ed7852a0694a809775cf8d0/losses.py#L91
-        # https://github.com/yang-song/score_sde_pytorch/blob/1618ddea340f3e4a2ed7852a0694a809775cf8d0/losses.py#L119
-        grad = -self.eps / self.from_sigmas
-        noise = torch.randn_like(grad)
-        grad_norm = grad.flatten(start_dim=1).norm(dim=1).mean()
-        noise_norm = noise.flatten(start_dim=1).norm(dim=1).mean()
-        step_size = (target_snr * noise_norm / grad_norm) ** 2 * 2 * self.from_alphas
-        x_mean = self.from_xs + step_size * grad
-        new_from_xs = x_mean + noise * torch.sqrt(step_size * 2)
-        return standardize.decode(new_from_xs)
-
-
-def test_perfect_model():
-    pass
