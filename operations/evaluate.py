@@ -46,7 +46,7 @@ def evaluate(config):
     }
 
     print("Loading model checkpoint")
-    model.load_state_dict(torch.load("model/model.pt", map_location=device))
+    model.load_state_dict(torch.load("model/average_model.pt", map_location=device))
     variational_encoder.load_state_dict(
         torch.load("model/variational_encoder.pt", map_location=device)
     )

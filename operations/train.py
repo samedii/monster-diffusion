@@ -32,7 +32,7 @@ def train(config):
     torch.set_grad_enabled(False)
 
     model = Model().eval().to(device)
-    model_ema = deepcopy(model).eval()
+    average_model = deepcopy(model).eval()
     variational_encoder = VariationalEncoderLDM().eval().to(device)
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(variational_encoder.parameters()),
@@ -90,12 +90,17 @@ def train(config):
     if Path("model").exists():
         print("Loading model checkpoint")
         model.load_state_dict(torch.load("model/model.pt", map_location=device))
-        model_ema.load_state_dict(torch.load("model/model_ema.pt", map_location=device))
+        average_model.load_state_dict(
+            torch.load("model/average_model.pt", map_location=device)
+        )
         variational_encoder.load_state_dict(
             torch.load("model/variational_encoder.pt", map_location=device)
         )
         optimizer.load_state_dict(torch.load("model/optimizer.pt", map_location=device))
         lantern.set_learning_rate(optimizer, config["learning_rate"])
+        kl_weight_controller.load_state_dict(
+            torch.load("model/kl_weight_controller.pt", map_location=device)
+        )
 
     tensorboard_logger = torch.utils.tensorboard.SummaryWriter(log_dir="tb")
     early_stopping = lantern.EarlyStopping(tensorboard_logger=tensorboard_logger)
@@ -145,7 +150,7 @@ def train(config):
             optimizer.zero_grad()
             scheduler.step()
             ema_decay = ema_scheduler.get_value()
-            ema_update(model, model_ema, ema_decay)
+            ema_update(model, average_model, ema_decay)
             ema_scheduler.step()
 
             if n_train_steps >= 100:
@@ -204,7 +209,7 @@ def train(config):
                     ]
                 )
 
-                evaluation_ts = model_ema.evaluation_ts()
+                evaluation_ts = average_model.evaluation_ts()
                 choice = torch.tensor(
                     [example.hash() % len(evaluation_ts) for example in examples]
                 )
@@ -219,9 +224,9 @@ def train(config):
                 with lantern.module_eval(variational_encoder):
                     variational_features = variational_encoder.features(images, noise)
 
-                diffused = model_ema.diffuse(images, ts, noise)
-                with lantern.module_eval(model_ema):
-                    predictions = model_ema.predictions(
+                diffused = average_model.diffuse(images, ts, noise)
+                with lantern.module_eval(average_model):
+                    predictions = average_model.predictions(
                         diffused,
                         ts,
                         nonleaky_augmentations,
@@ -293,6 +298,7 @@ def train(config):
         early_stopping = early_stopping.score(-fid_scores["evaluate_early_stopping"])
         if early_stopping.scores_since_improvement == 0:
             torch.save(model.state_dict(), "model.pt")
+            torch.save(average_model.state_dict(), "average_model.pt")
             torch.save(variational_encoder.state_dict(), "variational_encoder.pt")
             torch.save(optimizer.state_dict(), "optimizer.pt")
             torch.save(kl_weight_controller.state_dict(), "kl_weight_controller.pt")
