@@ -285,7 +285,7 @@ def train(config):
             )
             print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
-        early_stopping = early_stopping.score(-fid_scores["early_stopping"])
+        early_stopping = early_stopping.score(-fid_scores["evaluate_early_stopping"])
         if early_stopping.scores_since_improvement == 0:
             torch.save(model.state_dict(), "model.pt")
             torch.save(variational_encoder.state_dict(), "variational_encoder.pt")
