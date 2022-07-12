@@ -4,7 +4,7 @@ import torchvision.transforms.functional as TF
 import lantern
 
 from .tools.seeded_randn import seeded_randn
-from .model import Model
+from .model.model import Model
 from monster_diffusion import settings
 
 

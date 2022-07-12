@@ -9,13 +9,11 @@ import lantern
 from lantern import set_seeds
 import nicefid
 
-from monster_diffusion import (
-    data,
-    Model,
-    metrics,
-    log_examples,
-    settings,
-)
+import data
+from monster_diffusion import settings
+from monster_diffusion import metrics
+from monster_diffusion.log_examples import log_examples
+from monster_diffusion.model.model import Model
 from monster_diffusion.generate_samples import generate_samples
 from monster_diffusion.generate_cheat_samples import generate_cheat_samples
 from monster_diffusion.tools.seeded_randn import seeded_randn

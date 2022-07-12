@@ -2,7 +2,7 @@ import argparse
 import os
 import json
 from pathlib import Path
-import numpy as np
+from copy import deepcopy
 import torch
 import torch.nn.functional as F
 import torch.utils.tensorboard
@@ -12,18 +12,17 @@ from lantern import set_seeds, worker_init_fn
 import nicefid
 import wandb
 
-from monster_diffusion import (
-    data,
-    Model,
-    metrics,
-    log_examples,
-)
+import data
+from monster_diffusion.model.model import Model
+from monster_diffusion import metrics
+from monster_diffusion.log_examples import log_examples
 from monster_diffusion.model.variational_encoder import VariationalEncoderLDM
 from monster_diffusion.generate_samples import generate_samples
 from monster_diffusion.generate_cheat_samples import generate_cheat_samples
 from monster_diffusion.tools.seeded_randn import seeded_randn
 from monster_diffusion.tools.inverse_lr import InverseLR
 from monster_diffusion.kl_weight_controller import KLWeightController
+from monster_diffusion.model.ema import EMAWarmup, ema_update
 from monster_diffusion import settings
 
 
@@ -33,6 +32,7 @@ def train(config):
     torch.set_grad_enabled(False)
 
     model = Model().eval().to(device)
+    model_ema = deepcopy(model).eval()
     variational_encoder = VariationalEncoderLDM().eval().to(device)
     optimizer = torch.optim.AdamW(
         list(model.parameters()) + list(variational_encoder.parameters()),
@@ -41,6 +41,8 @@ def train(config):
         eps=1e-6,
         weight_decay=1e-3,
     )
+    scheduler = InverseLR(optimizer, inv_gamma=20000, power=1, warmup=0.99)
+    ema_scheduler = EMAWarmup(power=0.6667, max_value=0.9999)
     kl_weight_controller = KLWeightController(
         weights=[0.001],
         targets=[config["kl_target"]],
@@ -88,6 +90,7 @@ def train(config):
     if Path("model").exists():
         print("Loading model checkpoint")
         model.load_state_dict(torch.load("model/model.pt", map_location=device))
+        model_ema.load_state_dict(torch.load("model/model_ema.pt", map_location=device))
         variational_encoder.load_state_dict(
             torch.load("model/variational_encoder.pt", map_location=device)
         )
@@ -97,8 +100,6 @@ def train(config):
     tensorboard_logger = torch.utils.tensorboard.SummaryWriter(log_dir="tb")
     early_stopping = lantern.EarlyStopping(tensorboard_logger=tensorboard_logger)
     train_metrics = metrics.train_metrics()
-
-    scheduler = InverseLR(optimizer, inv_gamma=20000, power=1, warmup=0.99)
 
     n_train_steps = 0
     for _ in lantern.Epochs(config["max_steps"] // config["evaluate_every"]):
@@ -142,13 +143,16 @@ def train(config):
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             optimizer.zero_grad()
+            scheduler.step()
+            ema_decay = ema_scheduler.get_value()
+            ema_update(model, model_ema, ema_decay)
+            ema_scheduler.step()
 
             if n_train_steps >= 100:
                 kl_weight_controller.update_([variational_loss])
 
             n_train_steps += 1
 
-            scheduler.step()
             tensorboard_logger.add_scalar(
                 "learning_rate", scheduler.get_lr()[0], n_train_steps
             )
@@ -200,7 +204,7 @@ def train(config):
                     ]
                 )
 
-                evaluation_ts = Model.evaluation_ts()
+                evaluation_ts = model_ema.evaluation_ts()
                 choice = torch.tensor(
                     [example.hash() % len(evaluation_ts) for example in examples]
                 )
@@ -215,9 +219,9 @@ def train(config):
                 with lantern.module_eval(variational_encoder):
                     variational_features = variational_encoder.features(images, noise)
 
-                diffused = model.diffuse(images, ts, noise)
-                with lantern.module_eval(model):
-                    predictions = model.predictions(
+                diffused = model_ema.diffuse(images, ts, noise)
+                with lantern.module_eval(model_ema):
+                    predictions = model_ema.predictions(
                         diffused,
                         ts,
                         nonleaky_augmentations,

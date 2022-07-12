@@ -31,7 +31,7 @@ def datasets(frozen=True):
             proportions=dict(train=0.6, early_stopping=0.4),
             stratify_column="stratify",
             seed=700,
-            filepath="monster_diffusion/splits/splits.json",
+            filepath="data/splits/splits.json",
             frozen=frozen,
         )
     )

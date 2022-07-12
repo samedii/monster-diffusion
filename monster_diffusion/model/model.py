@@ -16,6 +16,7 @@ from .pseudo_linear_sampler import PseudoLinearSampler
 from . import diffusion
 from .variational_encoder import VariationalFeatures
 from .variational_encoder.decoder_cell import DecoderCell
+from .prediction import PredictionBatch
 
 
 class Model(nn.Module):
@@ -84,11 +85,11 @@ class Model(nn.Module):
 
     @staticmethod
     def sigmas(ts):
-        return model.PredictionBatch.sigmas(ts)
+        return PredictionBatch.sigmas(ts)
 
     @staticmethod
     def alphas(ts):
-        return model.PredictionBatch.alphas(ts)
+        return PredictionBatch.alphas(ts)
 
     @staticmethod
     def random_noise(size):
@@ -179,7 +180,7 @@ class Model(nn.Module):
             nonleaky_augmentations,
             variational_features,
         )
-        return model.PredictionBatch(
+        return PredictionBatch(
             denoised_xs=denoised_xs,
             diffused_images=diffused_images,
             ts=ts,
@@ -492,9 +493,6 @@ class Model(nn.Module):
         denoised_xs = (from_diffused_xs - eps * from_sigmas) / from_alphas
         to_diffused_xs = denoised_xs * to_alphas + eps * to_sigmas
         return standardize.decode(to_diffused_xs)
-
-
-Model.PredictionBatch = model.PredictionBatch
 
 
 def test_model():

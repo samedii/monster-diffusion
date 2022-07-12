@@ -11,13 +11,11 @@ import lantern
 from lantern import set_seeds, worker_init_fn
 from cleanfid import fid
 
-from monster_diffusion import (
-    data,
-    Model,
-    metrics,
-    log_examples,
-)
-from monster_diffusion.temporary_samples import temporary_samples
+import data
+from monster_diffusion.model.model import Model
+from monster_diffusion import metrics
+from monster_diffusion.log_examples import log_examples
+from monster_diffusion.generate_samples import generate_samples
 from monster_diffusion.tools.seeded_randn import seeded_randn
 from monster_diffusion.model.variational_encoder import VariationalEncoderLDM
 

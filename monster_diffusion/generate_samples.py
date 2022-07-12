@@ -2,7 +2,7 @@ from tqdm import trange
 import torch
 import lantern
 
-from .model import Model
+from .model.model import Model
 
 
 def generate_samples(model: Model, n_samples=1024, batch_size=32, n_evaluations=100):

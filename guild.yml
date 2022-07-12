@@ -1,6 +1,6 @@
 - package: monster-diffusion-package
   data-files:
-    - monster_diffusion/splits/*.json
+    - data/splits/*.json
     - pyproject.toml
 
 - model: monster-diffusion-r1
@@ -83,9 +83,9 @@
       sources:
         - operation: train|retrain|swa
     splits:
-      path: monster_diffusion
+      path: data
       sources:
-        - monster_diffusion/splits
+        - data/splits
     notebooks:
       sources:
         - notebooks
