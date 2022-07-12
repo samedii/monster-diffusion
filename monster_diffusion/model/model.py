@@ -1,7 +1,6 @@
-from typing import Optional
 from tqdm import tqdm
-from pydantic import validate_arguments
 import numpy as np
+from scipy import integrate
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -242,6 +241,22 @@ class Model(nn.Module):
         )
         return standardize.decode(reversed_diffused_xs)
 
+    def sample(
+        self,
+        size,
+        n_evaluations=100,
+        progress=False,
+        variational_features=None,
+        diffused_images=None,
+    ):
+        return self.elucidated_sample(
+            size,
+            n_evaluations,
+            progress,
+            variational_features,
+            diffused_images,
+        )
+
     def elucidated_sample(
         self,
         size,
@@ -256,7 +271,7 @@ class Model(nn.Module):
         if self.training:
             raise Exception("Cannot run sample method while in training mode.")
         if diffused_images is None:
-            diffused_images = self.random_noise(size)
+            diffused_images = self.random_noise(size).to(self.device)
         if variational_features is None:
             variational_features = VariationalFeatures.sample(size).to(self.device)
         nonleaky_augmentations = torch.zeros(
@@ -299,6 +314,96 @@ class Model(nn.Module):
         predictions = self.predictions(
             diffused_images,
             reversed_ts,
+            nonleaky_augmentations,
+            variational_features,
+        )
+        progress.close()
+        yield predictions.denoised_images
+
+    @staticmethod
+    def linear_multistep_coeff(order, sigmas, from_index, to_index):
+        if order - 1 > from_index:
+            raise ValueError(f"Order {order} too high for step {from_index}")
+
+        def fn(tau):
+            prod = 1.0
+            for k in range(order):
+                if to_index == k:
+                    continue
+                prod *= (tau - sigmas[from_index - k]) / (
+                    sigmas[from_index - to_index] - sigmas[from_index - k]
+                )
+            return prod
+
+        return integrate.quad(
+            fn, sigmas[from_index], sigmas[from_index + 1], epsrel=1e-4
+        )[0]
+
+    def linear_multistep_sample(
+        self,
+        size,
+        n_evaluations=100,
+        progress=False,
+        variational_features=None,
+        diffused_images=None,
+        order=4,
+    ):
+        """
+        Katherine Crowson's linear multistep method from https://github.com/crowsonkb/k-diffusion/blob/4fdb34081f7a09f16c33d3344a042e5bea8e69ee/k_diffusion/sampling.py
+        """
+        if self.training:
+            raise Exception("Cannot run sample method while in training mode.")
+        if diffused_images is None:
+            diffused_images = self.random_noise(size)
+        if variational_features is None:
+            variational_features = VariationalFeatures.sample(size).to(self.device)
+        nonleaky_augmentations = torch.zeros(
+            (size, 9), dtype=torch.float32, device=self.device
+        )
+        diffused_images = diffused_images.to(self.device)
+
+        n_steps = n_evaluations
+        schedule_ts = self.schedule_ts(n_steps)[:, None].repeat(1, size).to(self.device)
+
+        epses = list()
+        progress = tqdm(total=n_steps, disable=not progress, leave=False)
+        for from_index, from_ts, to_ts in zip(
+            range(n_steps), schedule_ts[:-1], schedule_ts[1:]
+        ):
+
+            predictions = self.predictions(
+                diffused_images,
+                from_ts,
+                nonleaky_augmentations,
+                variational_features,
+            )
+            epses.append(predictions.eps)
+            if len(epses) > order:
+                epses.pop(0)
+
+            current_order = len(epses)
+            coeffs = [
+                self.linear_multistep_coeff(
+                    current_order,
+                    self.sigmas(schedule_ts[:, 0]).cpu().flatten(),
+                    from_index,
+                    to_index,
+                )
+                for to_index in range(current_order)
+            ]
+
+            diffused_xs = standardize.encode(diffused_images)
+            diffused_xs = diffused_xs + sum(
+                coeff * eps for coeff, eps in zip(coeffs, reversed(epses))
+            )
+            diffused_images = standardize.decode(diffused_xs)
+
+            progress.update()
+            yield predictions.denoised_images
+
+        predictions = self.predictions(
+            diffused_images,
+            to_ts,
             nonleaky_augmentations,
             variational_features,
         )
