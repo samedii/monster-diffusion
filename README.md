@@ -15,6 +15,7 @@ Inspired by:
 - [DiVAE : Photorealistic Images Synthesis with Denoising Diffusion Decoder](https://arxiv.org/pdf/2206.00386.pdf)
 - [DiffuseVAE: Efficient, Controllable and High-Fidelity Generation from Low-Dimensional Latents](https://github.com/kpandey008/DiffuseVAE)
 - [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/abs/2206.00364)
+- [Katherine Crowson's k-diffusion](https://github.com/crowsonkb/k-diffusion)
 - [Score-Based Generative Modeling through Stochastic Differential Equations](https://github.com/yang-song/score_sde_pytorch)
 - [Velocity diffusion sampling](https://github.com/crowsonkb/v-diffusion-pytorch)
 - [Progressive Distillation for Fast Sampling of Diffusion Models](https://openreview.net/forum?id=TIdIXIpzhoI)
