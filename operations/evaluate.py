@@ -135,7 +135,7 @@ def evaluate(config):
 
     for n_evaluations in [20, 100]:
         generated_features = nicefid.Features.from_iterator(
-            generate_samples(model, n_evaluations=n_evaluations)
+            generate_samples(model, n_samples=1024 * 10, n_evaluations=n_evaluations)
         )
         fid_scores = {
             name: nicefid.compute_fid(

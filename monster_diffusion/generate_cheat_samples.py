@@ -29,7 +29,7 @@ def generate_cheat_samples(
         ts = model.schedule_ts(n_evaluations // 2)[0].repeat(len(examples))
         diffused_images = model.diffuse(images, ts, noise)
         with lantern.module_eval(model):
-            for images in model.sample(
+            for images in model.linear_multistep_sample(
                 len(images),
                 variational_features=variational_features,
                 diffused_images=diffused_images,

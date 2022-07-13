@@ -8,11 +8,9 @@ import torch.utils.tensorboard
 import lantern
 from lantern import set_seeds, worker_init_fn
 
-from monster_diffusion import (
-    data,
-    Model,
-    metrics,
-)
+import data
+from monster_diffusion.model.model import Model
+from monster_diffusion import metrics
 from monster_diffusion.model.variational_encoder import VariationalEncoderLDM
 
 

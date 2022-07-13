@@ -204,15 +204,13 @@ class Model(nn.Module):
     def forward(
         self,
         input,
-        sigma,
+        time_features,
         mapping_cond=None,
         unet_cond=None,
         cross_cond=None,
         cross_cond_padding=None,
     ):
-        # c_noise = sigma.log() / 4
-        c_noise = sigma.log() / 4
-        timestep_embed = self.timestep_embed(utils.append_dims(c_noise, 2))
+        timestep_embed = self.timestep_embed(utils.append_dims(time_features, 2))
         mapping_cond_embed = (
             torch.zeros_like(timestep_embed)
             if mapping_cond is None

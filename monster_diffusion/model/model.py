@@ -62,16 +62,10 @@ class Model(nn.Module):
 
     @staticmethod
     def schedule_ts(n_steps):
-        indices = torch.arange(n_steps)
-        return (
-            diffusion.sigma_max ** (1 / diffusion.rho)
-            + indices
-            / (n_steps - 1)
-            * (
-                diffusion.sigma_min ** (1 / diffusion.rho)
-                - diffusion.sigma_max ** (1 / diffusion.rho)
-            )
-        ) ** diffusion.rho
+        ramp = torch.linspace(0, 1, n_steps)
+        min_inv_rho = diffusion.sigma_min ** (1 / diffusion.rho)
+        max_inv_rho = diffusion.sigma_max ** (1 / diffusion.rho)
+        return (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** diffusion.rho
 
     @staticmethod
     def evaluation_ts():
@@ -150,8 +144,7 @@ class Model(nn.Module):
 
         output = self.network(
             self.c_in(ts) * diffused_xs,
-            # self.c_noise(ts),
-            self.sigmas(ts).flatten(),  # c_noise is applied in the network
+            self.c_noise(self.sigmas(ts).flatten()),
             # mapping_cond=torch.cat(
             #     [
             #         nonleaky_augmentations,
@@ -226,7 +219,8 @@ class Model(nn.Module):
         return torch.where(
             (ts >= diffusion.S_tmin) & (ts <= diffusion.S_tmax),
             torch.minimum(
-                torch.tensor(diffusion.S_churn / n_steps), torch.tensor(2).sqrt() - 1
+                torch.tensor(diffusion.S_churn / n_steps),
+                torch.tensor(2).sqrt() - 1,
             ).to(ts),
             torch.zeros_like(ts),
         )
@@ -237,11 +231,12 @@ class Model(nn.Module):
 
     def inject_noise(self, diffused_images, ts, reversed_ts):
         diffused_xs = standardize.encode(diffused_images).to(self.device)
-        new_noise = torch.randn_like(diffused_xs) * diffusion.S_noise
+
         reversed_diffused_xs = (
             diffused_xs
             + (self.sigmas(reversed_ts).square() - self.sigmas(ts).square()).sqrt()
-            * new_noise
+            * torch.randn_like(diffused_xs)
+            * diffusion.S_noise
         )
         return standardize.decode(reversed_diffused_xs)
 
@@ -253,7 +248,7 @@ class Model(nn.Module):
         variational_features=None,
         diffused_images=None,
     ):
-        return self.linear_multistep_sample(
+        return self.elucidated_sample(
             size,
             n_evaluations,
             progress,
@@ -284,20 +279,22 @@ class Model(nn.Module):
 
         n_steps = n_evaluations // 2
         schedule_ts = self.schedule_ts(n_steps)[:, None].repeat(1, size).to(self.device)
-
+        i = 0
         progress = tqdm(total=n_steps, disable=not progress, leave=False)
         for from_ts, to_ts in zip(schedule_ts[:-1], schedule_ts[1:]):
             reversed_ts = self.reversed_ts(from_ts, n_steps).clamp(max=schedule_ts[0])
-            diffused_images = self.inject_noise(diffused_images, from_ts, reversed_ts)
+            reversed_diffused_images = self.inject_noise(
+                diffused_images, from_ts, reversed_ts
+            )
+            i += 1
 
             predictions = self.predictions(
-                diffused_images,
+                reversed_diffused_images,
                 reversed_ts,
                 nonleaky_augmentations,
                 # variational_features,
             )
             reversed_eps = predictions.eps
-            reversed_diffused_images = diffused_images
             diffused_images = predictions.step(to_ts)
 
             predictions = self.predictions(
@@ -310,7 +307,7 @@ class Model(nn.Module):
                 reversed_diffused_images, reversed_ts, reversed_eps
             )
             progress.update()
-            yield predictions.denoised_images
+            yield predictions.denoised_images.clamp(0, 1)
 
         reversed_ts = self.reversed_ts(to_ts, n_steps)
         diffused_images = self.inject_noise(diffused_images, to_ts, reversed_ts)
@@ -322,7 +319,7 @@ class Model(nn.Module):
             # variational_features,
         )
         progress.close()
-        yield predictions.denoised_images
+        yield predictions.denoised_images.clamp(0, 1)
 
     @staticmethod
     def linear_multistep_coeff(order, sigmas, from_index, to_index):
@@ -403,7 +400,7 @@ class Model(nn.Module):
             diffused_images = standardize.decode(diffused_xs)
 
             progress.update()
-            yield predictions.denoised_images
+            yield predictions.denoised_images.clamp(0, 1)
 
         predictions = self.predictions(
             diffused_images,
@@ -412,7 +409,7 @@ class Model(nn.Module):
             # variational_features,
         )
         progress.close()
-        yield predictions.denoised_images
+        yield predictions.denoised_images.clamp(0, 1)
 
     def euler_sample(
         self,
@@ -496,3 +493,117 @@ class Model(nn.Module):
         denoised_xs = (from_diffused_xs - eps * from_sigmas) / from_alphas
         to_diffused_xs = denoised_xs * to_alphas + eps * to_sigmas
         return standardize.decode(to_diffused_xs)
+
+
+def test_elucidated_sample():
+    """
+    Test random model against kcrowson's elucidated sampler implementation.
+    """
+
+    model = Model().eval().requires_grad_(False).cuda()
+    ts = model.schedule_ts(5).cuda()
+    sigmas = model.sigmas(ts).flatten(start_dim=1)
+
+    def to_d(x, sigma, denoised):
+        """Converts a denoiser output to a Karras ODE derivative."""
+        return (x - denoised) / sigma
+
+    def reference_model(x, sigmas):
+        return model.predictions(
+            standardize.decode(x), sigmas, torch.zeros(1, 9).cuda()
+        ).denoised_xs
+
+    second_order = True
+    s_churn = 80
+    s_tmin = 0.05
+    s_tmax = 50
+    s_noise = 1.003
+    original_x = torch.randn(1, *settings.INPUT_SHAPE).cuda().mul(sigmas[0])
+    x = original_x.clone()
+
+    torch.manual_seed(123)
+    noises = list()
+    for i in range(len(sigmas) - 1):
+        gamma = (
+            min(s_churn / (len(sigmas) - 1), 2**0.5 - 1)
+            if s_tmin <= sigmas[i] <= s_tmax
+            else 0
+        )
+        noise = torch.randn_like(x)
+        eps = noise * s_noise
+        noises.append(noise)
+        sigma_hat = sigmas[i] * (gamma + 1)
+        if gamma > 0:
+            x = x + eps * (sigma_hat**2 - sigmas[i] ** 2) ** 0.5
+
+        denoised = reference_model(x, sigma_hat)
+        d = to_d(x, sigma_hat, denoised)
+
+        dt = sigmas[i + 1] - sigma_hat
+        if sigmas[i + 1] == 0 or not second_order:
+            x = x + d * dt
+        else:
+            x_2 = x + d * dt
+            denoised_2 = reference_model(x_2, sigmas[i + 1])
+            d_2 = to_d(x_2, sigmas[i + 1], denoised_2)
+            d_prime = (d + d_2) / 2
+            x = x + d_prime * dt
+
+    torch.manual_seed(123)
+    for sample in model.elucidated_sample(
+        1,
+        n_evaluations=10,
+        diffused_images=standardize.decode(original_x),
+        # noises=noises,
+    ):
+        pass
+
+    assert torch.allclose(
+        x.cpu().clamp(-1, 1), standardize.encode(sample).cpu(), atol=1e-3
+    )
+
+
+def test_lms_sample():
+    """
+    Test random model against crowsonkb's linear multistep sampler implementation.
+    """
+    model = Model().eval().requires_grad_(False).cuda()
+    ts = model.schedule_ts(10).cuda()
+    sigmas = model.sigmas(ts).flatten(start_dim=1)
+
+    def to_d(x, sigma, denoised):
+        """Converts a denoiser output to a Karras ODE derivative."""
+        return (x - denoised) / sigma
+
+    def reference_model(x, sigmas):
+        return model.predictions(
+            standardize.decode(x), sigmas, torch.zeros(1, 9).cuda()
+        ).denoised_xs
+
+    order = 4
+    original_x = torch.randn(1, *settings.INPUT_SHAPE).cuda().mul(sigmas[0])
+    x = original_x.clone()
+    ds = []
+    for i in range(len(sigmas) - 1):
+        denoised = reference_model(x, sigmas[i])
+
+        d = to_d(x, sigmas[i], denoised)
+        ds.append(d)
+        if len(ds) > order:
+            ds.pop(0)
+
+        cur_order = min(i + 1, order)
+        coeffs = [
+            model.linear_multistep_coeff(cur_order, sigmas.cpu(), i, j)
+            for j in range(cur_order)
+        ]
+        x = x + sum(coeff * d for coeff, d in zip(coeffs, reversed(ds)))
+
+    for sample in model.linear_multistep_sample(
+        1, n_evaluations=10, diffused_images=standardize.decode(original_x)
+    ):
+        pass
+
+    assert torch.allclose(
+        x.cpu().clamp(-1, 1), standardize.encode(sample).cpu(), atol=1e-3
+    )

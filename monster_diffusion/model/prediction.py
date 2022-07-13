@@ -132,7 +132,10 @@ class PredictionBatch(FunctionalBase):
         to_ts = to_ts.to(self.device)
         to_alphas, to_sigmas = self.alphas(to_ts), self.sigmas(to_ts)
 
-        to_diffused_xs = self.denoised_xs * to_alphas + self.eps * to_sigmas
+        # to_diffused_xs = self.denoised_xs * to_alphas + self.eps * to_sigmas
+        # return standardize.decode(to_diffused_xs)
+
+        to_diffused_xs = self.diffused_xs + self.eps * (to_sigmas - self.from_sigmas)
         return standardize.decode(to_diffused_xs)
 
     def correction(self, previous_diffused_images, previous_ts, previous_eps):
