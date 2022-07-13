@@ -26,7 +26,7 @@ def evaluate(config):
     torch.set_grad_enabled(False)
 
     model = Model().eval().to(device)
-    variational_encoder = VariationalEncoderLDM().eval().to(device)
+    # variational_encoder = VariationalEncoderLDM().eval().to(device)
 
     evaluate_datastreams = data.evaluate_datastreams()
     evaluate_data_loaders = {
@@ -47,9 +47,9 @@ def evaluate(config):
 
     print("Loading model checkpoint")
     model.load_state_dict(torch.load("model/average_model.pt", map_location=device))
-    variational_encoder.load_state_dict(
-        torch.load("model/variational_encoder.pt", map_location=device)
-    )
+    # variational_encoder.load_state_dict(
+    #     torch.load("model/variational_encoder.pt", map_location=device)
+    # )
 
     tensorboard_logger = torch.utils.tensorboard.SummaryWriter(log_dir="tb")
 
@@ -96,8 +96,8 @@ def evaluate(config):
                     for example in examples
                 ]
             )
-            with lantern.module_eval(variational_encoder):
-                variational_features = variational_encoder.features(images, noise)
+            # with lantern.module_eval(variational_encoder):
+            #     variational_features = variational_encoder.features(images, noise)
 
             diffused = model.diffuse(images, ts, noise)
             with lantern.module_eval(model):
@@ -105,14 +105,14 @@ def evaluate(config):
                     diffused,
                     ts,
                     nonleaky_augmentations,
-                    variational_features,
+                    # variational_features,
                 )
-                variational_losses = variational_features.losses()
-                variational_loss = variational_losses.mean()
+                # variational_losses = variational_features.losses()
+                # variational_loss = variational_losses.mean()
                 loss = predictions.loss(images, noise)
 
             evaluate_metrics["loss"].update_(loss)
-            evaluate_metrics["variational_loss"].update_(variational_loss)
+            # evaluate_metrics["variational_loss"].update_(variational_loss)
             evaluate_metrics["image_mse"].update_(predictions.image_mse(images))
             evaluate_metrics["eps_mse"].update_(predictions.eps_mse(noise))
 
@@ -150,27 +150,27 @@ def evaluate(config):
             )
             print(f"{name}/fid@{n_evaluations}: {fid_score}")
 
-        cheat_fid_scores = {
-            name: nicefid.compute_fid(
-                features,
-                nicefid.Features.from_iterator(
-                    generate_cheat_samples(
-                        model,
-                        variational_encoder,
-                        evaluate_data_loaders[name],
-                        n_evaluations=n_evaluations,
-                    )
-                ),
-            )
-            for name, features in reference_features.items()
-        }
-        for name, cheat_fid_score in cheat_fid_scores.items():
-            tensorboard_logger.add_scalar(
-                f"{name}/cheat_fid@{n_evaluations}",
-                cheat_fid_score,
-                global_step,
-            )
-            print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
+        # cheat_fid_scores = {
+        #     name: nicefid.compute_fid(
+        #         features,
+        #         nicefid.Features.from_iterator(
+        #             generate_cheat_samples(
+        #                 model,
+        #                 variational_encoder,
+        #                 evaluate_data_loaders[name],
+        #                 n_evaluations=n_evaluations,
+        #             )
+        #         ),
+        #     )
+        #     for name, features in reference_features.items()
+        # }
+        # for name, cheat_fid_score in cheat_fid_scores.items():
+        #     tensorboard_logger.add_scalar(
+        #         f"{name}/cheat_fid@{n_evaluations}",
+        #         cheat_fid_score,
+        #         global_step,
+        #     )
+        #     print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
     tensorboard_logger.close()
 

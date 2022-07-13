@@ -33,20 +33,21 @@ def train(config):
 
     model = Model().eval().to(device)
     average_model = deepcopy(model).eval()
-    variational_encoder = VariationalEncoderLDM().eval().to(device)
+    # variational_encoder = VariationalEncoderLDM().eval().to(device)
     optimizer = torch.optim.AdamW(
-        list(model.parameters()) + list(variational_encoder.parameters()),
+        # list(model.parameters()) + list(variational_encoder.parameters()),
+        model.parameters(),
         lr=config["learning_rate"],
         betas=(0.95, 0.999),
         eps=1e-6,
         weight_decay=1e-3,
     )
-    scheduler = InverseLR(optimizer, inv_gamma=20000, power=1, warmup=0.99)
+    scheduler = InverseLR(optimizer, inv_gamma=20000, power=1.0, warmup=0.99)
     ema_scheduler = EMAWarmup(power=0.6667, max_value=0.9999)
-    kl_weight_controller = KLWeightController(
-        weights=[0.001],
-        targets=[config["kl_target"]],
-    )
+    # kl_weight_controller = KLWeightController(
+    #     weights=[0.001],
+    #     targets=[config["kl_target"]],
+    # )
 
     train_datastream = data.train_datastream()
 
@@ -93,14 +94,14 @@ def train(config):
         average_model.load_state_dict(
             torch.load("model/average_model.pt", map_location=device)
         )
-        variational_encoder.load_state_dict(
-            torch.load("model/variational_encoder.pt", map_location=device)
-        )
+        # variational_encoder.load_state_dict(
+        #     torch.load("model/variational_encoder.pt", map_location=device)
+        # )
         optimizer.load_state_dict(torch.load("model/optimizer.pt", map_location=device))
         lantern.set_learning_rate(optimizer, config["learning_rate"])
-        kl_weight_controller.load_state_dict(
-            torch.load("model/kl_weight_controller.pt", map_location=device)
-        )
+        # kl_weight_controller.load_state_dict(
+        #     torch.load("model/kl_weight_controller.pt", map_location=device)
+        # )
 
     tensorboard_logger = torch.utils.tensorboard.SummaryWriter(log_dir="tb")
     early_stopping = lantern.EarlyStopping(tensorboard_logger=tensorboard_logger)
@@ -123,26 +124,27 @@ def train(config):
             ts = Model.training_ts(len(examples))
             noise = torch.randn_like(images.float())
             diffused = model.diffuse(images, ts, noise)
-            with lantern.module_train(model), lantern.module_train(
-                variational_encoder
-            ), torch.enable_grad():
-                variational_features = variational_encoder.features_(images, noise)
+            # with lantern.module_train(model), lantern.module_train(
+            #     variational_encoder
+            # ), torch.enable_grad():
+            with lantern.module_train(model), torch.enable_grad():
+                # variational_features = variational_encoder.features_(images, noise)
                 predictions = model.predictions_(
                     diffused,
                     ts,
                     nonleaky_augmentations,
-                    variational_features,
+                    # variational_features,
                 )
-                variational_losses = variational_features.losses()
-                variational_loss = variational_losses.mean()
+                # variational_losses = variational_features.losses()
+                # variational_loss = variational_losses.mean()
                 loss = (
                     predictions.loss(images, noise)
-                    + kl_weight_controller.weights[0]
-                    * F.softplus(
-                        variational_losses.log()
-                        - torch.tensor(kl_weight_controller.targets[0]).log(),
-                        beta=5,
-                    ).mean()
+                    # + kl_weight_controller.weights[0]
+                    # * F.softplus(
+                    #     variational_losses.log()
+                    #     - torch.tensor(kl_weight_controller.targets[0]).log(),
+                    #     beta=5,
+                    # ).mean()
                 )
                 loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -153,23 +155,23 @@ def train(config):
             ema_update(model, average_model, ema_decay)
             ema_scheduler.step()
 
-            if n_train_steps >= 100:
-                kl_weight_controller.update_([variational_loss])
+            # if n_train_steps >= 100:
+            #     kl_weight_controller.update_([variational_loss])
 
             n_train_steps += 1
 
             tensorboard_logger.add_scalar(
                 "learning_rate", scheduler.get_lr()[0], n_train_steps
             )
-            tensorboard_logger.add_scalar(
-                "variational_weight", kl_weight_controller.weights[0], n_train_steps
-            )
-            tensorboard_logger.add_scalar(
-                "kl_target", kl_weight_controller.targets[0], n_train_steps
-            )
+            # tensorboard_logger.add_scalar(
+            #     "variational_weight", kl_weight_controller.weights[0], n_train_steps
+            # )
+            # tensorboard_logger.add_scalar(
+            #     "kl_target", kl_weight_controller.targets[0], n_train_steps
+            # )
 
             train_metrics["loss"].update_(loss)
-            train_metrics["variational_loss"].update_(variational_loss)
+            # train_metrics["variational_loss"].update_(variational_loss)
             train_metrics["image_mse"].update_(predictions.image_mse(images))
             train_metrics["eps_mse"].update_(predictions.eps_mse(noise))
 
@@ -221,8 +223,8 @@ def train(config):
                     ]
                 )
 
-                with lantern.module_eval(variational_encoder):
-                    variational_features = variational_encoder.features(images, noise)
+                # with lantern.module_eval(variational_encoder):
+                #     variational_features = variational_encoder.features(images, noise)
 
                 diffused = average_model.diffuse(images, ts, noise)
                 with lantern.module_eval(average_model):
@@ -230,22 +232,22 @@ def train(config):
                         diffused,
                         ts,
                         nonleaky_augmentations,
-                        variational_features,
+                        # variational_features,
                     )
-                    variational_losses = variational_features.losses()
-                    variational_loss = variational_losses.mean()
+                    # variational_losses = variational_features.losses()
+                    # variational_loss = variational_losses.mean()
                     loss = (
                         predictions.loss(images, noise)
-                        + kl_weight_controller.weights[0]
-                        * F.softplus(
-                            variational_losses.log()
-                            - torch.tensor(kl_weight_controller.targets[0]).log(),
-                            beta=5,
-                        ).mean()
+                        # + kl_weight_controller.weights[0]
+                        # * F.softplus(
+                        #     variational_losses.log()
+                        #     - torch.tensor(kl_weight_controller.targets[0]).log(),
+                        #     beta=5,
+                        # ).mean()
                     )
 
                 evaluate_metrics["loss"].update_(loss)
-                evaluate_metrics["variational_loss"].update_(variational_loss)
+                # evaluate_metrics["variational_loss"].update_(variational_loss)
                 evaluate_metrics["image_mse"].update_(predictions.image_mse(images))
                 evaluate_metrics["eps_mse"].update_(predictions.eps_mse(noise))
 
@@ -272,36 +274,36 @@ def train(config):
             )
             print(f"{name}/fid@{n_evaluations}: {fid_score}")
 
-        n_evaluations = 20
-        cheat_fid_scores = {
-            name: nicefid.compute_fid(
-                features,
-                nicefid.Features.from_iterator(
-                    generate_cheat_samples(
-                        model,
-                        variational_encoder,
-                        evaluate_data_loaders[name],
-                        n_evaluations=n_evaluations,
-                    )
-                ),
-            )
-            for name, features in reference_features.items()
-        }
-        for name, cheat_fid_score in cheat_fid_scores.items():
-            tensorboard_logger.add_scalar(
-                f"{name}/cheat_fid@{n_evaluations}",
-                cheat_fid_score,
-                n_train_steps,
-            )
-            print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
+        # n_evaluations = 20
+        # cheat_fid_scores = {
+        #     name: nicefid.compute_fid(
+        #         features,
+        #         nicefid.Features.from_iterator(
+        #             generate_cheat_samples(
+        #                 model,
+        #                 variational_encoder,
+        #                 evaluate_data_loaders[name],
+        #                 n_evaluations=n_evaluations,
+        #             )
+        #         ),
+        #     )
+        #     for name, features in reference_features.items()
+        # }
+        # for name, cheat_fid_score in cheat_fid_scores.items():
+        #     tensorboard_logger.add_scalar(
+        #         f"{name}/cheat_fid@{n_evaluations}",
+        #         cheat_fid_score,
+        #         n_train_steps,
+        #     )
+        #     print(f"{name}/cheat_fid@{n_evaluations}: {cheat_fid_score}")
 
         early_stopping = early_stopping.score(-fid_scores["evaluate_early_stopping"])
         if early_stopping.scores_since_improvement == 0:
             torch.save(model.state_dict(), "model.pt")
             torch.save(average_model.state_dict(), "average_model.pt")
-            torch.save(variational_encoder.state_dict(), "variational_encoder.pt")
+            # torch.save(variational_encoder.state_dict(), "variational_encoder.pt")
             torch.save(optimizer.state_dict(), "optimizer.pt")
-            torch.save(kl_weight_controller.state_dict(), "kl_weight_controller.pt")
+            # torch.save(kl_weight_controller.state_dict(), "kl_weight_controller.pt")
         elif early_stopping.scores_since_improvement > config["patience"]:
             break
         early_stopping.log(n_train_steps).print()
@@ -311,10 +313,10 @@ def train(config):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch_size", type=int, default=40)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--evaluate_batch_size", type=int, default=32)
-    parser.add_argument("--learning_rate", type=float, default=5e-5)
-    parser.add_argument("--kl_target", type=float, default=1e-3)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    # parser.add_argument("--kl_target", type=float, default=1e-3)
     parser.add_argument("--max_steps", type=int, default=5000 * 200)
     parser.add_argument("--evaluate_every", default=5000, type=int)
     parser.add_argument("--patience", type=float, default=10)

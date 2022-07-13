@@ -1,8 +1,8 @@
 P_mean = -1.2
 P_std = 1.2
 sigma_data = 0.5
-raw = 7
-sigma_min = 0.002
+rho = 7
+sigma_min = 1e-2  # 0.002
 sigma_max = 80
 
 # depends on dataset, see table 5 in https://arxiv.org/pdf/2206.00364.pdf

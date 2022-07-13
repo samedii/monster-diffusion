@@ -1,9 +1,8 @@
 import torch
 from torch import nn
-from torch.nn import functional as F
 
-from monster_diffusion import settings
 from . import layers, utils
+from monster_diffusion import settings
 
 
 class ResConvBlock(layers.ConditionedResidualBlock):
@@ -205,13 +204,14 @@ class Model(nn.Module):
     def forward(
         self,
         input,
-        c_noise,
+        sigma,
         mapping_cond=None,
         unet_cond=None,
         cross_cond=None,
         cross_cond_padding=None,
     ):
         # c_noise = sigma.log() / 4
+        c_noise = sigma.log() / 4
         timestep_embed = self.timestep_embed(utils.append_dims(c_noise, 2))
         mapping_cond_embed = (
             torch.zeros_like(timestep_embed)

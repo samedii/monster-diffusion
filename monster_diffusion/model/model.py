@@ -38,17 +38,18 @@ class Model(nn.Module):
         # self.network = DDPM()
         # self.network = ImagenUnet(text_embed_dim=np.prod(settings.PRIOR_SHAPE))
         self.network = k_diffusion.Model(
-            mapping_cond_dim=np.prod(settings.PRIOR_SHAPE) + 9,
-            unet_cond_dim=settings.PRIOR_SHAPE[0],
+            # mapping_cond_dim=np.prod(settings.PRIOR_SHAPE) + 9,
+            mapping_cond_dim=9,
+            # unet_cond_dim=settings.PRIOR_SHAPE[0],
         )
 
-        latent_channels = 64
-        channels = 64
-        self.decoded_sample = nn.Sequential(
-            nn.Conv2d(latent_channels, channels, kernel_size=1, bias=False),
-            DecoderCell(channels),
-            DecoderCell(channels),
-        )
+        # latent_channels = 64
+        # channels = 64
+        # self.decoded_sample = nn.Sequential(
+        #     nn.Conv2d(latent_channels, channels, kernel_size=1, bias=False),
+        #     DecoderCell(channels),
+        #     DecoderCell(channels),
+        # )
 
     @property
     def device(self):
@@ -63,14 +64,14 @@ class Model(nn.Module):
     def schedule_ts(n_steps):
         indices = torch.arange(n_steps)
         return (
-            diffusion.sigma_max ** (1 / diffusion.raw)
+            diffusion.sigma_max ** (1 / diffusion.rho)
             + indices
             / (n_steps - 1)
             * (
-                diffusion.sigma_min ** (1 / diffusion.raw)
-                - diffusion.sigma_max ** (1 / diffusion.raw)
+                diffusion.sigma_min ** (1 / diffusion.rho)
+                - diffusion.sigma_max ** (1 / diffusion.rho)
             )
-        ) ** diffusion.raw
+        ) ** diffusion.rho
 
     @staticmethod
     def evaluation_ts():
@@ -138,7 +139,7 @@ class Model(nn.Module):
         diffused_images: Tensor.dims("NCHW").shape(-1, *settings.INPUT_SHAPE).float(),
         ts: Tensor.dims("N"),
         nonleaky_augmentations: Tensor.dims("NK"),
-        variational_features: VariationalFeatures,
+        # variational_features: VariationalFeatures,
     ) -> Tensor.dims("NCHW").shape(-1, *settings.INPUT_SHAPE):
         """
         Parameterization from https://arxiv.org/pdf/2206.00364.pdf
@@ -149,21 +150,23 @@ class Model(nn.Module):
 
         output = self.network(
             self.c_in(ts) * diffused_xs,
-            self.c_noise(ts),
-            mapping_cond=torch.cat(
-                [
-                    nonleaky_augmentations,
-                    self.decoded_sample(variational_features.features).flatten(
-                        start_dim=1
-                    ),
-                ],
-                dim=1,
-            ),
-            unet_cond=F.interpolate(
-                variational_features.features,
-                size=diffused_xs.shape[2:],
-                mode="nearest",
-            ),
+            # self.c_noise(ts),
+            self.sigmas(ts).flatten(),  # c_noise is applied in the network
+            # mapping_cond=torch.cat(
+            #     [
+            #         nonleaky_augmentations,
+            #         self.decoded_sample(variational_features.features).flatten(
+            #             start_dim=1
+            #         ),
+            #     ],
+            #     dim=1,
+            # ),
+            mapping_cond=nonleaky_augmentations,
+            # unet_cond=F.interpolate(
+            #     variational_features.features,
+            #     size=diffused_xs.shape[2:],
+            #     mode="nearest",
+            # ),
         )
         return self.c_skip(ts) * diffused_xs + self.c_out(ts) * output
 
@@ -172,13 +175,13 @@ class Model(nn.Module):
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
         nonleaky_augmentations: Tensor.dims("NK"),
-        variational_features: VariationalFeatures,
+        # variational_features: VariationalFeatures,
     ):
         denoised_xs = self.denoised_(
             diffused_images,
             ts,
             nonleaky_augmentations,
-            variational_features,
+            # variational_features,
         )
         return PredictionBatch(
             denoised_xs=denoised_xs,
@@ -191,13 +194,13 @@ class Model(nn.Module):
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
         nonleaky_augmentations: Tensor.dims("NK"),
-        variational_features: VariationalFeatures,
+        # variational_features: VariationalFeatures,
     ):
         return self.forward(
             diffused_images,
             ts,
             nonleaky_augmentations,
-            variational_features,
+            # variational_features,
         )
 
     def predictions(
@@ -205,7 +208,7 @@ class Model(nn.Module):
         diffused_images: Tensor.dims("NCHW"),
         ts: Tensor.dims("N"),
         nonleaky_augmentations: Tensor.dims("NK"),
-        variational_features: VariationalFeatures,
+        # variational_features: VariationalFeatures,
     ):
         if self.training:
             raise Exception(
@@ -215,7 +218,7 @@ class Model(nn.Module):
             diffused_images,
             ts,
             nonleaky_augmentations,
-            variational_features,
+            # variational_features,
         )
 
     @staticmethod
@@ -250,7 +253,7 @@ class Model(nn.Module):
         variational_features=None,
         diffused_images=None,
     ):
-        return self.elucidated_sample(
+        return self.linear_multistep_sample(
             size,
             n_evaluations,
             progress,
@@ -273,8 +276,8 @@ class Model(nn.Module):
             raise Exception("Cannot run sample method while in training mode.")
         if diffused_images is None:
             diffused_images = self.random_noise(size).to(self.device)
-        if variational_features is None:
-            variational_features = VariationalFeatures.sample(size).to(self.device)
+        # if variational_features is None:
+        #     variational_features = VariationalFeatures.sample(size).to(self.device)
         nonleaky_augmentations = torch.zeros(
             (size, 9), dtype=torch.float32, device=self.device
         )
@@ -291,7 +294,7 @@ class Model(nn.Module):
                 diffused_images,
                 reversed_ts,
                 nonleaky_augmentations,
-                variational_features,
+                # variational_features,
             )
             reversed_eps = predictions.eps
             reversed_diffused_images = diffused_images
@@ -301,7 +304,7 @@ class Model(nn.Module):
                 diffused_images,
                 to_ts,
                 nonleaky_augmentations,
-                variational_features,
+                # variational_features,
             )
             diffused_images = predictions.correction(
                 reversed_diffused_images, reversed_ts, reversed_eps
@@ -316,7 +319,7 @@ class Model(nn.Module):
             diffused_images,
             reversed_ts,
             nonleaky_augmentations,
-            variational_features,
+            # variational_features,
         )
         progress.close()
         yield predictions.denoised_images
@@ -356,8 +359,8 @@ class Model(nn.Module):
             raise Exception("Cannot run sample method while in training mode.")
         if diffused_images is None:
             diffused_images = self.random_noise(size)
-        if variational_features is None:
-            variational_features = VariationalFeatures.sample(size).to(self.device)
+        # if variational_features is None:
+        #     variational_features = VariationalFeatures.sample(size).to(self.device)
         nonleaky_augmentations = torch.zeros(
             (size, 9), dtype=torch.float32, device=self.device
         )
@@ -376,7 +379,7 @@ class Model(nn.Module):
                 diffused_images,
                 from_ts,
                 nonleaky_augmentations,
-                variational_features,
+                # variational_features,
             )
             epses.append(predictions.eps)
             if len(epses) > order:
@@ -406,7 +409,7 @@ class Model(nn.Module):
             diffused_images,
             to_ts,
             nonleaky_augmentations,
-            variational_features,
+            # variational_features,
         )
         progress.close()
         yield predictions.denoised_images
@@ -420,7 +423,7 @@ class Model(nn.Module):
         progress=False,
     ):
         diffused_images = self.random_noise(size)
-        variational_features = VariationalFeatures.sample(size).to(self.device)
+        # variational_features = VariationalFeatures.sample(size).to(self.device)
 
         n_steps = n_evaluations // (1 + n_correction_steps)
         ts = self.schedule_ts(n_steps).repeat(1, size).to(self.device)
@@ -432,7 +435,7 @@ class Model(nn.Module):
                 predictions_corrector = self.predictions(
                     diffused_images,
                     from_ts,
-                    variational_features,
+                    # variational_features,
                 )
                 diffused_images = predictions_corrector.langevin_correction(target_snr)
 
@@ -444,7 +447,7 @@ class Model(nn.Module):
             predictions = self.predictions(
                 diffused_images,
                 reversed_ts,
-                variational_features,
+                # variational_features,
             )
             diffused_images = predictions.step(to_ts)
             yield predictions.denoised_images
@@ -453,14 +456,14 @@ class Model(nn.Module):
         predictions = self.predictions(
             diffused_images,
             to_ts,
-            variational_features,
+            # variational_features,
         )
         progress.close()
         yield predictions.denoised_images
 
     def plms_sample(self, size, n_evaluations=100, progress=False):
         diffused_images = self.random_noise(size).to(self.device)
-        variational_features = VariationalFeatures.sample(size).to(self.device)
+        # variational_features = VariationalFeatures.sample(size).to(self.device)
 
         n_steps = n_evaluations
         sampler = PseudoLinearSampler(self.schedule_ts(n_steps)).to(self.device)
@@ -469,7 +472,7 @@ class Model(nn.Module):
             predictions = self.predictions(
                 diffused_images,
                 from_ts,
-                variational_features,
+                # variational_features,
             )
             eps = sampler.eps_(predictions.eps)
             diffused_images = self.transfer(diffused_images, from_ts, to_ts, eps)
@@ -479,7 +482,7 @@ class Model(nn.Module):
         predictions = self.predictions(
             diffused_images,
             to_ts,
-            variational_features,
+            # variational_features,
         )
         progress.close()
         yield predictions.denoised_images
@@ -493,15 +496,3 @@ class Model(nn.Module):
         denoised_xs = (from_diffused_xs - eps * from_sigmas) / from_alphas
         to_diffused_xs = denoised_xs * to_alphas + eps * to_sigmas
         return standardize.decode(to_diffused_xs)
-
-
-def test_model():
-    import torch
-
-    torch.set_grad_enabled(False)
-    model = Model().eval()
-    model.predictions_(
-        torch.zeros((2, *settings.INPUT_SHAPE)),
-        torch.zeros((2,)),
-        VariationalFeatures.sample(2),
-    )

@@ -5,7 +5,7 @@ Generates 48x48 images of monsters.
 
 | FID@20 | FID@100 |
 | ------ | ------- |
-| 52.5   | 41.8    |
+| 40.9   | 30.?    |
 
 FID between `train` and `early_stopping` is **7.36**. `FID@k` means that the
 samples require `k` model evaluations.
@@ -20,6 +20,11 @@ Inspired by:
 - [Velocity diffusion sampling](https://github.com/crowsonkb/v-diffusion-pytorch)
 - [Progressive Distillation for Fast Sampling of Diffusion Models](https://openreview.net/forum?id=TIdIXIpzhoI)
 - [Diffusion Models Beat GANS on Image Synthesis](https://github.com/crowsonkb/guided-diffusion)
+
+## Todo
+
+- [ ] Fix Heun sampling (should reach early_stopping 27.313980842046988)
+- [ ] Fix LMS sampling (should reach early_stopping ~30)
 
 ## Install
 
